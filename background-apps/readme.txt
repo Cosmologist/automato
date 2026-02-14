@@ -1,0 +1,1 @@
+Disabling the "Allow apps to run in the background" setting
