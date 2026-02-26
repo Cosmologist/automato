@@ -1,0 +1,2 @@
+#!/bin/bash
+gsettings set org.gnome.Terminal.Legacy.Settings menu-accelerator-enabled false
