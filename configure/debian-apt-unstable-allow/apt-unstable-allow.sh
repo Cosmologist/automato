@@ -114,12 +114,26 @@ fi
 # Interactive prompt
 # ---------------------------------------------------------------------------
 if [ ${#SUITES[@]} -eq 0 ]; then
-    echo -n "Which suites to add? (space-separated, e.g., unstable testing): "
-    read -r -a SUITES
-    if [ ${#SUITES[@]} -eq 0 ]; then
-        echo -e "${RED}Error:${NC} no suites specified"
+    echo "Available suites:"
+    echo "  1) unstable"
+    echo "  2) testing"
+    echo "  3) both"
+    echo ""
+    echo -n "Enter number(s) (space-separated, e.g. 1 2): "
+    read -r -a selections
+    if [ ${#selections[@]} -eq 0 ]; then
+        echo -e "${RED}Error:${NC} no suites selected"
         exit 1
     fi
+    SUITES=()
+    for sel in "${selections[@]}"; do
+        case "$sel" in
+            1) SUITES+=("unstable") ;;
+            2) SUITES+=("testing")  ;;
+            3) SUITES+=("unstable" "testing") ;;
+            *) echo -e "${RED}Error:${NC} invalid number '$sel'"; exit 1 ;;
+        esac
+    done
 fi
 
 # ---------------------------------------------------------------------------

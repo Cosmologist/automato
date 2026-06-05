@@ -34,6 +34,7 @@ Print a brief summary of what the script does and why, plus 1–3 typical usage 
 
 ### 2. Interactive Argument Prompt
 If the script requires arguments and none are provided, prompt interactively for missing values.
+Present a numbered list of options and ask the user to enter the corresponding number(s), not free-form text.
 
 ### 3. Input Validation
 Validate all arguments before execution. Fail early with a clear message.
