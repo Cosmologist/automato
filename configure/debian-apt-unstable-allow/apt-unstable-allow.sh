@@ -13,9 +13,9 @@ echo "=== debian-apt-unstable-allow ==="
 echo "Adds Debian unstable/testing repos to APT with pinning (priority 50)."
 echo ""
 echo "Usage:"
-echo "  sudo ./apply.sh --check              pre-flight checks only"
-echo "  sudo ./apply.sh                      interactive mode"
-echo "  sudo ./apply.sh unstable [testing]   specify suites"
+echo "  sudo ./apt-unstable-allow.sh --check              pre-flight checks only"
+echo "  sudo ./apt-unstable-allow.sh                      interactive mode"
+echo "  sudo ./apt-unstable-allow.sh unstable [testing]   specify suites"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ SUITES=()
 for a in "$@"; do
     if [ "${a:0:2}" = "--" ] && [ "$a" != "--check" ]; then
         echo -e "${RED}Error:${NC} unknown flag '$a'"
-        echo "Usage: sudo ./apply.sh [--check|unstable|testing ...]"
+        echo "Usage: sudo ./apt-unstable-allow.sh [--check|unstable|testing ...]"
         exit 1
     fi
 done

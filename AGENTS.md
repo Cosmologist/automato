@@ -8,8 +8,17 @@ Use **English** for all code, comments, commit messages, and documentation.
 - **`configure/`** — system/application config tweaks (remove packages, disable services, settings).
 - **`tools/`** — general-purpose utility scripts.
 
+## Endpoint
+An **endpoint** is a leaf executable file in the project tree — the script at the
+end of a branch that performs the actual work: `./[category]/[purpose_name]/<script_name>`.
+
 # Naming
 Naming: `./[configure|tools]/[os_]<purpose_name>/<script_short_name>` (kebab-case)
+
+## Endpoint naming
+The endpoint script name MUST match its parent directory name.
+If the directory name starts with an OS prefix (e.g. `linux-`, `debian-`, `ubuntu-`),
+that prefix is dropped from the script name. (`gnome-` is not an OS prefix.)
 
 ## Preferred programming language
 Language: bash for small scripts, Python for complex logic/portability.
