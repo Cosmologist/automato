@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 ALLOW_NO_RESULT=false
+ALL_MODE=false
 
 # Colors
 GREEN='\033[0;32m'
@@ -17,23 +18,23 @@ print_summary() {
 Displays network information about the current machine.
 
 Usage:
-  $SCRIPT_NAME [--allow-no-result] ethernet          — Print first ethernet interface name
-  $SCRIPT_NAME [--allow-no-result] mark              — Print a free iptables fwmark value (hex)
-  $SCRIPT_NAME [--allow-no-result] table             — Print a free routing table number
-  $SCRIPT_NAME               mask    <interface>     — Print subnet (CIDR) for an interface
-  $SCRIPT_NAME               gateway <interface>     — Print gateway for an interface
-  $SCRIPT_NAME               env     <interface>     — Print export statements for all modes
+  $SCRIPT_NAME [--allow-no-result] [--all] active   — Print primary interface (or all with --all)
+  $SCRIPT_NAME [--allow-no-result] mark                        — Print a free iptables fwmark value (hex)
+  $SCRIPT_NAME [--allow-no-result] table                       — Print a free routing table number
+  $SCRIPT_NAME [--allow-no-result] mask      [<interface>]     — Print subnet (CIDR) for an interface
+  $SCRIPT_NAME [--allow-no-result] gateway   [<interface>]     — Print gateway for an interface
+  $SCRIPT_NAME [--allow-no-result] env       [<interface>]     — Print export statements for all modes
 
 Without --allow-no-result: exits with code 1 when nothing found.
 With    --allow-no-result: prints empty string and exits with code 0.
 
 Examples:
-  IFACE=\$($SCRIPT_NAME ethernet)
-  $SCRIPT_NAME mark           # => 0x100
-  $SCRIPT_NAME table          # => 1
-  $SCRIPT_NAME mask eth0      # => 192.168.0.0/24
-  $SCRIPT_NAME gateway eno1   # => 192.168.1.1
-  eval "\$($SCRIPT_NAME env eno1)"
+  IFACE=\$($SCRIPT_NAME active)
+  $SCRIPT_NAME mark                       # => 0x100
+  $SCRIPT_NAME table                      # => 1
+  $SCRIPT_NAME mask                       # uses active interface
+  $SCRIPT_NAME gateway eno1               # => 192.168.1.1
+  eval "\$($SCRIPT_NAME env)"
 
 EOF
 }
@@ -46,7 +47,7 @@ preflight() {
   fi
 }
 
-# ── Mode: ethernet ───────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────
 no_result() {
   local msg="$1"
   echo "$msg" >&2
@@ -58,15 +59,71 @@ no_result() {
   fi
 }
 
-cmd_ethernet() {
-  echo "Looking for first ethernet interface..." >&2
+is_physical() {
+  test -L "/sys/class/net/$1/device"
+}
+
+all_iface_list() {
+  ip -br link show 2>/dev/null | awk '{print $1}'
+}
+
+physical_iface_list() {
   local iface
-  iface=$(ip -br link show 2>/dev/null | awk '/^e(n|th)/{print $1; exit}')
-  if [ -z "$iface" ]; then
-    no_result "No ethernet interface found"
+  for iface in /sys/class/net/*; do
+    iface=$(basename "$iface")
+    if is_physical "$iface"; then
+      echo "$iface"
+    fi
+  done
+}
+
+pick_primary() {
+  local default_iface
+  default_iface=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+
+  local candidate
+
+  # Prefer the interface with the default route
+  if [ -n "$default_iface" ]; then
+    while IFS= read -r candidate; do
+      if [ "$candidate" = "$default_iface" ]; then
+        echo "$candidate"
+        return 0
+      fi
+    done
   fi
-  echo "Found: $iface" >&2
-  echo "$iface"
+
+  # Fallback: first candidate with an IPv4 address
+  while IFS= read -r candidate; do
+    if ip -o -4 addr show dev "$candidate" 2>/dev/null | grep -q .; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  # Last resort: first candidate
+  while IFS= read -r candidate; do
+    echo "$candidate"
+    return 0
+  done
+}
+
+# ── Mode: active ────────────────────────────────────────────
+cmd_active() {
+  if $ALL_MODE; then
+    echo "Looking for primary interface (physical + virtual)..." >&2
+    local first
+    first=$(all_iface_list | pick_primary)
+  else
+    echo "Looking for primary physical interface..." >&2
+    local first
+    first=$(physical_iface_list | pick_primary)
+  fi
+  if [ -z "$first" ]; then
+    no_result "No primary interface found"
+  fi
+  echo "Found: $first" >&2
+  echo "$first"
 }
 
 # ── Mode: mark ───────────────────────────────────────────────
@@ -182,7 +239,6 @@ cmd_table() {
   no_result "No free table number found"
 }
 
-# ── Helpers ──────────────────────────────────────────────────
 validate_iface() {
   local iface="$1"
   if ! ip link show "$iface" &>/dev/null; then
@@ -211,17 +267,18 @@ prompt_iface() {
 cmd_mask() {
   local iface="${1:-}"
   if [ -z "$iface" ]; then
-    echo "No interface specified" >&2
-    prompt_iface
-  else
-    IFACE="$iface"
+    iface=$(physical_iface_list | pick_primary)
+    if [ -z "$iface" ]; then
+      no_result "No active interface found"
+    fi
+    echo "Using active interface: $iface" >&2
   fi
-  validate_iface "$IFACE"
-  echo "Getting subnet mask for $IFACE..." >&2
+  validate_iface "$iface"
+  echo "Getting subnet for $iface..." >&2
   local network
-  network=$(ip route show dev "$IFACE" 2>/dev/null | awk '/scope link/{print $1; exit}')
+  network=$(ip route show dev "$iface" 2>/dev/null | awk '/scope link/{print $1; exit}')
   if [ -z "$network" ]; then
-    no_result "No subnet found for $IFACE"
+    no_result "No subnet found for $iface"
   fi
   echo "Subnet: $network" >&2
   echo "$network"
@@ -231,17 +288,18 @@ cmd_mask() {
 cmd_gateway() {
   local iface="${1:-}"
   if [ -z "$iface" ]; then
-    echo "No interface specified" >&2
-    prompt_iface
-  else
-    IFACE="$iface"
+    iface=$(physical_iface_list | pick_primary)
+    if [ -z "$iface" ]; then
+      no_result "No active interface found"
+    fi
+    echo "Using active interface: $iface" >&2
   fi
-  validate_iface "$IFACE"
-  echo "Getting gateway for $IFACE..." >&2
+  validate_iface "$iface"
+  echo "Getting gateway for $iface..." >&2
   local gw
-  gw=$(ip route show default dev "$IFACE" 2>/dev/null | awk '{print $3}')
+  gw=$(ip route show default dev "$iface" 2>/dev/null | awk '{print $3}')
   if [ -z "$gw" ]; then
-    no_result "No default gateway found on $IFACE"
+    no_result "No default gateway found on $iface"
   fi
   echo "Gateway: $gw" >&2
   echo "$gw"
@@ -251,19 +309,20 @@ cmd_gateway() {
 cmd_env() {
   local iface="${1:-}"
   if [ -z "$iface" ]; then
-    echo "No interface specified" >&2
-    prompt_iface
-  else
-    IFACE="$iface"
+    iface=$(physical_iface_list | pick_primary)
+    if [ -z "$iface" ]; then
+      no_result "No active interface found"
+    fi
+    echo "Using active interface: $iface" >&2
   fi
-  validate_iface "$IFACE"
+  validate_iface "$iface"
 
-  echo "Collecting network info for $IFACE..." >&2
+  echo "Collecting network info for $iface..." >&2
 
   local val
 
-  val=$(ALLOW_NO_RESULT=true cmd_ethernet 2>/dev/null || true)
-  [ -n "$val" ] && echo "export NETWORK_ETHERNET='$val'"
+  val=$(ALLOW_NO_RESULT=true cmd_active 2>/dev/null || true)
+  [ -n "$val" ] && echo "export NETWORK_ACTIVE='$val'"
 
   val=$(ALLOW_NO_RESULT=true cmd_mark 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_MARK='$val'"
@@ -271,17 +330,17 @@ cmd_env() {
   val=$(ALLOW_NO_RESULT=true cmd_table 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_TABLE='$val'"
 
-  val=$(ALLOW_NO_RESULT=true cmd_mask "$IFACE" 2>/dev/null || true)
+  val=$(ALLOW_NO_RESULT=true cmd_mask "$iface" 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_MASK='$val'"
 
-  val=$(ALLOW_NO_RESULT=true cmd_gateway "$IFACE" 2>/dev/null || true)
+  val=$(ALLOW_NO_RESULT=true cmd_gateway "$iface" 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_GATEWAY='$val'"
 }
 
 # ── Interactive prompt ──────────────────────────────────────
 interactive_prompt() {
   echo "Select mode:" >&2
-  echo "  1) ethernet  — Show first ethernet interface" >&2
+  echo "  1) active    — Show active physical interface(s)" >&2
   echo "  2) mark      — Show free iptables fwmark" >&2
   echo "  3) table     — Show free routing table number" >&2
   echo "  4) mask      — Show subnet for an interface" >&2
@@ -291,7 +350,7 @@ interactive_prompt() {
   echo >&2
 
   case "$choice" in
-    1) MODE="ethernet" ;;
+    1) MODE="active" ;;
     2) MODE="mark" ;;
     3) MODE="table" ;;
     4) MODE="mask" ;;
@@ -312,6 +371,7 @@ ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --allow-no-result) ALLOW_NO_RESULT=true ;;
+    --all) ALL_MODE=true ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -326,8 +386,8 @@ if ! preflight; then
 fi
 
 case "$MODE" in
-  ethernet | e)
-    cmd_ethernet
+  active | a)
+    cmd_active
     ;;
   mark | m)
     cmd_mark
@@ -346,7 +406,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "  Valid modes: ethernet, mark, table, mask, gateway, env" >&2
+    echo "  Valid modes: active, mark, table, mask, gateway, env" >&2
     exit 1
     ;;
 esac
