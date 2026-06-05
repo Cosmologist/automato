@@ -105,6 +105,7 @@ PreDown = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATE
 PreDown = ip route flush table ${table} 2>/dev/null  true
 #
 $end
+
 BLOCK
 }
 
@@ -130,7 +131,7 @@ remove_block() {
 
 insert_block() {
   local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5"
-  local start end block_file tmpfile
+  local start end block_file
   start=$(block_start_marker "$iface")
   end=$(block_end_marker "$iface")
 
@@ -148,31 +149,40 @@ insert_block() {
     sed -i '1s/^/[Interface]\n/' "$CONFIG_FILE"
   fi
 
-  tmpfile=$(mktemp)
-  inserted=false
+  # Read all lines into array
+  mapfile -t lines < "$CONFIG_FILE"
 
-  # Insert block before [Peer] or at end
-  if grep -q '^\[Peer\]' "$CONFIG_FILE" 2>/dev/null; then
-    while IFS= read -r line; do
-      if [[ "$line" == "[Peer]"* ]] && ! $inserted; then
-        cat "$block_file" >> "$tmpfile"
-        inserted=true
-      fi
-      echo "$line" >> "$tmpfile"
-    done < "$CONFIG_FILE"
-  else
-    cat "$CONFIG_FILE" >> "$tmpfile"
-    cat "$block_file" >> "$tmpfile"
-    inserted=true
-  fi
+  # Find insertion point: line index of first [Peer], or end of array
+  insert_at=${#lines[@]}
+  for i in "${!lines[@]}"; do
+    if [[ "${lines[$i]}" == "[Peer]"* ]]; then
+      insert_at=$i
+      break
+    fi
+  done
 
-  # If block was never inserted (no [Peer] found and file wasn't empty without [Peer])
-  if ! $inserted; then
-    cat "$block_file" >> "$tmpfile"
-  fi
+  # Strip trailing blank lines before insertion point
+  while [ "$insert_at" -gt 0 ] && [ -z "${lines[$((insert_at - 1))]}" ]; do
+    insert_at=$((insert_at - 1))
+  done
 
-  cat "$tmpfile" > "$CONFIG_FILE"
-  rm -f "$tmpfile" "$block_file"
+  # Rebuild file with block inserted
+  {
+    # Lines before insertion point
+    for ((i = 0; i < insert_at; i++)); do
+      printf '%s\n' "${lines[$i]}"
+    done
+
+    # Block (includes leading blank line, content, trailing blank line)
+    cat "$block_file"
+
+    # Lines from insertion point (first [Peer] or end)
+    for ((i = insert_at; i < ${#lines[@]}; i++)); do
+      printf '%s\n' "${lines[$i]}"
+    done
+  } > "$CONFIG_FILE"
+
+  rm -f "$block_file"
   echo -e "  ${GREEN}+${NC} $CONFIG_FILE — added symmetric routing block for $iface"
 }
 
