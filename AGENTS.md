@@ -26,6 +26,9 @@ Language: bash for small scripts, Python for complex logic/portability.
 ## Script Requirements
 Every script MUST implement all of the following:
 
+### 0. Shebang and Executable Permissions
+The script MUST have a correct shebang (`#!/bin/bash`, `#!/usr/bin/env python3`, etc.) and the executable bit MUST be set (`chmod +x`). This allows running the script directly as `./script.sh` without explicitly invoking an interpreter.
+
 ### 1. Summary Output (every run)
 Print a brief summary of what the script does and why, plus 1–3 typical usage examples. Display on every invocation, even when arguments are provided.
 
