@@ -9,7 +9,7 @@ NC='\033[0m'
 # ---------------------------------------------------------------------------
 # Summary — printed on every invocation
 # ---------------------------------------------------------------------------
-echo "=== debian_apt_unstable_allow ==="
+echo "=== debian-apt-unstable-allow ==="
 echo "Adds Debian unstable/testing repos to APT with pinning (priority 50)."
 echo ""
 echo "Usage:"
@@ -174,7 +174,7 @@ done
 pf="/etc/apt/preferences.d/debian-unstable-testing.pref"
 echo "Adding APT pinning..."
 {
-    echo "# APT pinning for unstable/testing — added by debian_apt_unstable_allow"
+    echo "# APT pinning for unstable/testing — added by debian-apt-unstable-allow"
     for suite in "${SUITES[@]}"; do
         echo ""
         echo "Package: *"

@@ -9,7 +9,7 @@ Use **English** for all code, comments, commit messages, and documentation.
 - **`tools/`** — general-purpose utility scripts.
 
 # Naming
-Naming: `./[configure|tools]/[os_]<purpose_name>/<script_short_name>` (snake_case)
+Naming: `./[configure|tools]/[os_]<purpose_name>/<script_short_name>` (kebab-case)
 
 ## Preferred programming language
 Language: bash for small scripts, Python for complex logic/portability.
