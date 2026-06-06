@@ -34,6 +34,11 @@ Examples:
   $SCRIPT_NAME disable eno1                      remove block for eno1
   $SCRIPT_NAME enable eno1 --no-restart          add block, skip restart
 
+Behavior:
+  The script stops AmneziaWG before modifying the config to avoid rule collisions.
+  For enable: stops service → inserts block → starts service
+  For disable: stops service → removes block
+
 EOF
 }
 
@@ -354,6 +359,27 @@ check_conflicts() {
   return 0
 }
 
+stop_amnezia() {
+  local svc
+  svc=$(amnezia_service 2>/dev/null || true)
+  if [ -n "$svc" ]; then
+    echo "  Stopping $svc..."
+    systemctl stop "$svc"
+  fi
+}
+
+start_amnezia() {
+  local svc
+  svc=$(amnezia_service 2>/dev/null || true)
+  if [ -n "$svc" ]; then
+    echo "  Starting $svc..."
+    systemctl start "$svc"
+  else
+    systemctl start amneziawg@wg0 2>/dev/null || \
+    systemctl start wg-quick@wg0 2>/dev/null || true
+  fi
+}
+
 # ── Main ─────────────────────────────────────────────────────
 print_summary
 
@@ -400,21 +426,11 @@ echo ""
 
 # ── Disable mode ────────────────────────────────────────────
 if [ "$MODE" = "disable" ]; then
-  WAS_RUNNING=false
-  amnezia_running && WAS_RUNNING=true
+  if amnezia_running; then
+    stop_amnezia
+  fi
 
   remove_block "$IFACE"
-
-  if $WAS_RUNNING && ! $NO_RESTART; then
-    echo "Restarting AmneziaWG..."
-    SVC=$(amnezia_service 2>/dev/null || true)
-    if [ -n "$SVC" ]; then
-      systemctl restart "$SVC"
-    else
-      systemctl restart amneziawg@wg0 2>/dev/null || \
-      systemctl restart wg-quick@wg0 2>/dev/null || true
-    fi
-  fi
 
   echo ""
   echo "Done. Block for $IFACE removed."
@@ -448,21 +464,15 @@ if ! check_conflicts; then
   die "Conflicts found — remove existing rules first"
 fi
 
-WAS_RUNNING=false
-amnezia_running && WAS_RUNNING=true
+if amnezia_running; then
+  stop_amnezia
+fi
 
 remove_block "$IFACE"
 insert_block "$IFACE" "$NET_SUBNET" "$NET_GATEWAY"
 
-if $WAS_RUNNING && ! $NO_RESTART; then
-  echo "Restarting AmneziaWG..."
-  SVC=$(amnezia_service 2>/dev/null || true)
-  if [ -n "$SVC" ]; then
-    systemctl restart "$SVC"
-  else
-    systemctl restart amneziawg@wg0 2>/dev/null || \
-    systemctl restart wg-quick@wg0 2>/dev/null || true
-  fi
+if ! $NO_RESTART; then
+  start_amnezia
 fi
 
 echo ""
