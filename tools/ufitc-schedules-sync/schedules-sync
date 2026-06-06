@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import re
 import sys
 from copy import copy
@@ -20,6 +21,7 @@ from openpyxl.utils import get_column_letter
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEDULES_FILE = SCRIPT_DIR / "schedules.xlsm"
 EMPLOYEES_FILE = SCRIPT_DIR / "employees.docx"
+DEPARTS_DIR = SCRIPT_DIR / "departs"
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
 YELLOW = "\033[1;33m"
@@ -33,17 +35,19 @@ def print_summary() -> None:
 Updates employee schedules in schedules.xlsm based on various data sources.
 
 Usage:
-  {Path(sys.argv[0]).name} current     — List all employee names from schedules.xlsm
-  {Path(sys.argv[0]).name} employees   — List all employee names + labels from employees.docx
-  {Path(sys.argv[0]).name} diff        — Compare schedules vs employees (full outer join)
-  {Path(sys.argv[0]).name} clean       — Remove from schedules rows without pair in employees
-  {Path(sys.argv[0]).name}             — Interactive mode
+  {Path(sys.argv[0]).name} current         — List all employee names from schedules.xlsm
+  {Path(sys.argv[0]).name} employees       — List all employee names + labels from employees.docx
+  {Path(sys.argv[0]).name} diff            — Compare schedules vs employees (full outer join)
+  {Path(sys.argv[0]).name} clean           — Remove from schedules rows without pair in employees
+  {Path(sys.argv[0]).name} collect <days>  — Collect employee data from departs/*.xlsx into schedule sheet
+  {Path(sys.argv[0]).name}                 — Interactive mode
 
 Examples:
   {Path(sys.argv[0]).name} current
   {Path(sys.argv[0]).name} employees
   {Path(sys.argv[0]).name} diff
   {Path(sys.argv[0]).name} clean
+  {Path(sys.argv[0]).name} collect 30
   {Path(sys.argv[0]).name}
 """,
         file=sys.stderr,
@@ -58,6 +62,9 @@ def preflight(mode: str = "") -> None:
     if mode in ("employees", "emp", "diff", "clean") and not EMPLOYEES_FILE.exists():
         print(f"Error: file not found: {EMPLOYEES_FILE}", file=sys.stderr)
         sys.exit(1)
+    if mode in ("collect", "col") and not DEPARTS_DIR.is_dir():
+        print(f"Error: directory not found: {DEPARTS_DIR}", file=sys.stderr)
+        sys.exit(1)
 
 
 # ── FIO helpers ──────────────────────────────────────────────
@@ -65,6 +72,24 @@ def normalize_fio(name: str) -> str:
     name = name.replace("\xa0", " ")
     name = re.sub(r"\s+", " ", name)
     return name.strip().replace("ё", "е").replace("Ё", "Е")
+
+
+def clean_fio_cell(val: Any) -> str:
+    s = str(val) if val is not None else ""
+    s = re.sub(r"\(ученик\)", "", s)
+    s = re.sub(r"^\d+/\d+\s*", "", s)
+    s = re.sub(r"\d+$", "", s)
+    return normalize_fio(s)
+
+
+def is_fio_cell(val: Any) -> bool:
+    s = clean_fio_cell(val)
+    if not s:
+        return False
+    parts = s.split(" ")
+    if len(parts) != 3:
+        return False
+    return all(re.match(r"^[А-ЯЁ][а-яё]+$", p) for p in parts)
 
 
 # ── XLSM parser ──────────────────────────────────────────────
@@ -270,7 +295,8 @@ def interactive_prompt() -> argparse.Namespace:
     print("  4) Clean     — remove rows without pair in employees", file=sys.stderr)
     print("  5) Check     — preview pending changes", file=sys.stderr)
     print("  6) Sync      — update schedules", file=sys.stderr)
-    choice = input("Enter number [1-6]: ").strip()
+    print("  7) Collect   — scan departs/*.xlsx → schedule sheet", file=sys.stderr)
+    choice = input("Enter number [1-7]: ").strip()
 
     args = argparse.Namespace()
     match choice:
@@ -286,6 +312,14 @@ def interactive_prompt() -> argparse.Namespace:
             args.mode = "check"
         case "6":
             args.mode = "sync"
+        case "7":
+            args.mode = "collect"
+            wd = input("Working days (28-31): ").strip()
+            try:
+                args.working_days = int(wd)
+            except ValueError:
+                print(f"Invalid number: {wd}", file=sys.stderr)
+                sys.exit(1)
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
             sys.exit(1)
@@ -422,20 +456,146 @@ def cmd_clean() -> None:
     print(f"Done. Cleaned data written to new sheet '{sheet_name}'.", file=sys.stderr)
 
 
+# ── Collect (departs → schedule sheet) ──────────────────────
+DAY_NAMES = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
+def _spiral_scan(ws) -> tuple[int, int] | None:
+    """Find first ФИО cell via clockwise spiral from A1. Returns (col, row)."""
+    max_row = ws.max_row or 0
+    max_col = ws.max_column or 0
+    limit = max(max_row, max_col)
+
+    for N in range(1, limit + 1):
+        if N <= max_col:
+            for r in range(1, N + 1):
+                if r <= max_row:
+                    val = ws.cell(row=r, column=N).value
+                    if is_fio_cell(val):
+                        return (N, r)
+        if N <= max_row:
+            for c in range(N - 1, 0, -1):
+                if c <= max_col:
+                    val = ws.cell(row=N, column=c).value
+                    if is_fio_cell(val):
+                        return (c, N)
+    return None
+
+
+def collect_from_file(filepath: Path, working_days: int) -> list[dict] | None:
+    """Scan one depart file and return list of {fio, data} or None if no ФИО found."""
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+    if ws.max_row is None or ws.max_column is None:
+        wb.close()
+        return None
+
+    pos = _spiral_scan(ws)
+    if pos is None:
+        wb.close()
+        return None
+
+    fio_col, start_row = pos
+    max_row = ws.max_row
+    max_col = ws.max_column
+    data_end = min(fio_col + working_days, max_col)
+
+    employees = []
+    for r in range(start_row, max_row + 1):
+        cell_val = ws.cell(row=r, column=fio_col).value
+        if cell_val is None:
+            break
+        cleaned = clean_fio_cell(cell_val)
+        if not cleaned or cleaned.count(" ") != 2:
+            continue
+
+        data = []
+        for c in range(fio_col + 1, data_end + 1):
+            data.append(ws.cell(row=r, column=c).value)
+
+        if not any(v is not None for v in data):
+            continue
+        employees.append({"fio": cleaned, "data": data})
+
+    wb.close()
+    return employees
+
+
+def render_schedule_sheet(employees: list[dict], working_days: int) -> None:
+    """Render collected employees into a new 'schedule' sheet in schedules.xlsm."""
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+
+    if "schedule" in wb.sheetnames:
+        del wb["schedule"]
+    ws = wb.create_sheet("schedule")
+
+    for idx, emp in enumerate(employees, start=1):
+        ws.cell(row=idx, column=1, value=idx)
+        ws.cell(row=idx, column=2, value=emp["fio"])
+        for di, val in enumerate(emp["data"]):
+            if val is not None:
+                ws.cell(row=idx, column=3 + di, value=val)
+
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+
+
+def cmd_collect(working_days: int) -> None:
+    """Collect employee data from all departs/*.xlsx into a new schedule sheet."""
+    if not DEPARTS_DIR.is_dir():
+        print(f"Error: directory not found: {DEPARTS_DIR}", file=sys.stderr)
+        sys.exit(1)
+
+    files = sorted(DEPARTS_DIR.glob("*.xlsx"))
+    files = [f for f in files if not f.name.startswith(".~lock.")]
+
+    if not files:
+        print(f"Error: no .xlsx files in {DEPARTS_DIR}", file=sys.stderr)
+        sys.exit(1)
+
+    all_employees: list[dict] = []
+
+    for filepath in files:
+        employees = collect_from_file(filepath, working_days)
+        if employees is None:
+            print(f"{YELLOW}skip{NC} {filepath.name} — no ФИО found", file=sys.stderr)
+            continue
+        print(
+            f"{GREEN}→{NC} departs/{filepath.name}: "
+            f"{len(employees)} сотрудников",
+            file=sys.stderr,
+        )
+        for emp in employees:
+            print(f"  {emp['fio']}", file=sys.stderr)
+        all_employees.extend(employees)
+
+    if not all_employees:
+        print("No employees found in any file.", file=sys.stderr)
+        return
+
+    print(f"\nRendering {len(all_employees)} employees to schedule sheet...", file=sys.stderr)
+    render_schedule_sheet(all_employees, working_days)
+    for idx, emp in enumerate(all_employees, start=1):
+        print(f"{GREEN}+{NC} schedule A{idx}: {emp['fio']}", file=sys.stderr)
+    print(f"Done. Created sheet 'schedule' in {SCHEDULES_FILE.name}.", file=sys.stderr)
+
+
 # ── Main ─────────────────────────────────────────────────────
 def main() -> None:
     print_summary()
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("mode", nargs="?", default="")
+    parser.add_argument("args", nargs="*", default=[])
 
-    args = parser.parse_args()
+    parsed = parser.parse_args()
 
-    if not args.mode:
+    if not parsed.args:
         ns = interactive_prompt()
     else:
-        ns = args
+        ns = argparse.Namespace()
+        ns.mode = parsed.args[0]
+        ns.extra = parsed.args[1:]
 
     preflight(ns.mode)
 
@@ -451,9 +611,19 @@ def main() -> None:
         cmd_check()
     elif ns.mode in ("sync", "s"):
         cmd_sync()
+    elif ns.mode in ("collect", "col"):
+        if hasattr(ns, "working_days"):
+            wd = ns.working_days
+        else:
+            try:
+                wd = int(ns.extra[0])
+            except (IndexError, ValueError):
+                print("Error: collect requires working days argument (e.g. collect 30)", file=sys.stderr)
+                sys.exit(1)
+        cmd_collect(wd)
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: current, employees, diff, clean, check, sync", file=sys.stderr)
+        print("  Valid modes: current, employees, diff, clean, check, collect, sync", file=sys.stderr)
         sys.exit(1)
 
 
