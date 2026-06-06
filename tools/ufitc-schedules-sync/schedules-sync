@@ -227,18 +227,19 @@ def cmd_diff() -> None:
     for e in emp[j:]:
         rows.append(("", e["fio"], e.get("label", ""), GREEN))
 
+    n_width = len(str(len(rows)))
     w1 = max((len(r[0]) for r in rows), default=0)
     w2 = max((len(r[1]) for r in rows), default=0)
     w1 = max(w1, len("schedule"))
     w2 = max(w2, len("employees"))
     sep = "  "
 
-    hdr = f"{'schedule'.ljust(w1)}{sep}{'employees'.ljust(w2)}{sep}label"
+    hdr = f"{'#'.ljust(n_width)}{sep}{'schedule'.ljust(w1)}{sep}{'employees'.ljust(w2)}{sep}label"
     print(hdr)
     print("-" * len(hdr))
 
-    for s_fio, e_fio, label, color in rows:
-        line = f"{s_fio.ljust(w1)}{sep}{e_fio.ljust(w2)}{sep}{label}"
+    for idx, (s_fio, e_fio, label, color) in enumerate(rows, start=1):
+        line = f"{str(idx).ljust(n_width)}{sep}{s_fio.ljust(w1)}{sep}{e_fio.ljust(w2)}{sep}{label}"
         if color:
             print(f"{color}{line}{NC}")
         else:
