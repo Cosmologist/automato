@@ -377,7 +377,7 @@ def cmd_clean() -> None:
         print("Nothing to remove — all schedule rows have a pair in employees.", file=sys.stderr)
         return
 
-    print(f"Removing {len(to_remove)} rows from {SCHEDULES_FILE}...", file=sys.stderr)
+    print(f"Removing {len(to_remove)} rows...", file=sys.stderr)
     wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
     ws = wb.active
     sm = SheetMapping(ws)
@@ -386,10 +386,15 @@ def cmd_clean() -> None:
         print(f"{RED}-{NC} Row {emp['row_num']}: {emp['fio']}", file=sys.stderr)
         sm.remove_row(emp["row_num"])
 
-    sm.render(ws)
+    sheet_name = "Clean"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+
     wb.save(SCHEDULES_FILE)
     wb.close()
-    print(f"Done. {len(to_remove)} rows removed.", file=sys.stderr)
+    print(f"Done. Cleaned data written to new sheet '{sheet_name}'.", file=sys.stderr)
 
 
 # ── Main ─────────────────────────────────────────────────────
