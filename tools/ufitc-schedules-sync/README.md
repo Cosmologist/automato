@@ -20,15 +20,12 @@
 3. `.strip()`
 4. `ё→е`, `Ё→Е`
 
-## Режимы
+## Режим `diff`
 
-| Команда | Что делает |
-|---------|-----------|
-| `current` | ФИО из schedules.xlsm, единый список, по алфавиту |
-| `employees` | ФИО + метка из employees.docx, по алфавиту |
-| `diff` | Full outer join: совпавшие (default), только в schedule (RED), только в employees (GREEN) |
-| `check` | Preview изменений (TODO) |
-| `sync` | Обновление расписания (TODO) |
+Full outer join списков ФИО из schedules.xlsm и employees.docx:
+- совпавшие — default (без цвета)
+- только в schedule — RED
+- только в employees — GREEN
 
 ## Парсинг xlsm
 - Пустая строка — разделитель таблиц (первая встреченная)
