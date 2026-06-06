@@ -202,25 +202,47 @@ def cmd_employees() -> None:
 def cmd_diff() -> None:
     sched = get_all_employees()
     emp = parse_employees(EMPLOYEES_FILE)
+    emp_by_fio = {e["fio"]: e for e in emp}
+
+    rows: list[tuple[str, str, str, str]] = []  # (sched_fio, emp_fio, label, color)
 
     i = j = 0
     while i < len(sched) and j < len(emp):
         cmp = (sched[i]["fio"] > emp[j]["fio"]) - (sched[i]["fio"] < emp[j]["fio"])
         if cmp == 0:
-            print(sched[i]["fio"])
+            label = emp_by_fio[sched[i]["fio"]].get("label", "")
+            rows.append((sched[i]["fio"], emp[j]["fio"], label, ""))
             i += 1
             j += 1
         elif cmp < 0:
-            print(f"{RED}{sched[i]['fio']}{NC}")
+            rows.append((sched[i]["fio"], "", "", RED))
             i += 1
         else:
-            print(f"{GREEN}{emp[j]['fio']}{NC}")
+            label = emp[j].get("label", "")
+            rows.append(("", emp[j]["fio"], label, GREEN))
             j += 1
 
     for e in sched[i:]:
-        print(f"{RED}{e['fio']}{NC}")
+        rows.append((e["fio"], "", "", RED))
     for e in emp[j:]:
-        print(f"{GREEN}{e['fio']}{NC}")
+        rows.append(("", e["fio"], e.get("label", ""), GREEN))
+
+    w1 = max((len(r[0]) for r in rows), default=0)
+    w2 = max((len(r[1]) for r in rows), default=0)
+    w1 = max(w1, len("schedule"))
+    w2 = max(w2, len("employees"))
+    sep = "  "
+
+    hdr = f"{'schedule'.ljust(w1)}{sep}{'employees'.ljust(w2)}{sep}label"
+    print(hdr)
+    print("-" * len(hdr))
+
+    for s_fio, e_fio, label, color in rows:
+        line = f"{s_fio.ljust(w1)}{sep}{e_fio.ljust(w2)}{sep}{label}"
+        if color:
+            print(f"{color}{line}{NC}")
+        else:
+            print(line)
 
 
 def cmd_check() -> None:
