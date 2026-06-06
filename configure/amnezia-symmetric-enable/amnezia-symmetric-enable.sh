@@ -94,6 +94,12 @@ $start
 # напрмер обращения к роутеру на котором проброшены порты до сервера.
 
 # Применяем при поднятии amneniawg
+# Сначала удаляем старые правила на случай если завершение прошло неудачно
+PostUp = ip rule del fwmark ${mark} table ${table} priority ${PRIORITY} 2>/dev/null || true
+PostUp = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null || true
+PostUp = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || true
+PostUp = ip route flush table ${table} 2>/dev/null || true
+# Затем добавляем актуальные
 PostUp = iptables -t mangle -A PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark}
 PostUp = iptables -t mangle -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark
 PostUp = ip rule add fwmark ${mark} table ${table} priority ${PRIORITY}
