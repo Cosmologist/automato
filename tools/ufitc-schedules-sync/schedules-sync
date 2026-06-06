@@ -40,6 +40,7 @@ Usage:
   {Path(sys.argv[0]).name} diff            — Compare schedules vs employees (full outer join)
   {Path(sys.argv[0]).name} clean           — Remove from schedules rows without pair in employees
   {Path(sys.argv[0]).name} collect <days>  — Collect employee data from departs/*.xlsx into schedule sheet
+  {Path(sys.argv[0]).name} merge           — Merge Clean + schedule + first-sheet-table2 into Final
   {Path(sys.argv[0]).name}                 — Interactive mode
 
 Examples:
@@ -48,6 +49,7 @@ Examples:
   {Path(sys.argv[0]).name} diff
   {Path(sys.argv[0]).name} clean
   {Path(sys.argv[0]).name} collect 30
+  {Path(sys.argv[0]).name} merge
   {Path(sys.argv[0]).name}
 """,
         file=sys.stderr,
@@ -249,6 +251,8 @@ class SheetMapping:
             if r1 > row_num and r2 > row_num:
                 new_merged.append((r1 - 1, c1, r2 - 1, c2))
             elif r1 <= row_num <= r2:
+                if r1 == row_num and r2 == row_num:
+                    continue
                 new_merged.append((r1, c1, r2 - 1, c2))
             else:
                 new_merged.append((r1, c1, r2, c2))
@@ -262,6 +266,95 @@ class SheetMapping:
                 new_heights[r - 1] = h
         self.row_heights = new_heights
         self.max_row -= 1
+
+    def get_row(self, row_num: int) -> dict[int, CellData]:
+        return {c: self.cells[(row_num, c)] for (r, c) in self.cells if r == row_num}
+
+    def set_cell_value(self, row: int, col: int, value: Any) -> None:
+        key = (row, col)
+        if key in self.cells:
+            self.cells[key].value = value
+        else:
+            self.cells[key] = CellData(
+                value=value,
+                font=Font(),
+                fill=PatternFill(),
+                border=Border(),
+                alignment=Alignment(),
+                number_format="General",
+            )
+
+    def set_cell_fill(self, row: int, col: int, fill: PatternFill) -> None:
+        key = (row, col)
+        if key in self.cells:
+            self.cells[key].fill = fill
+
+    def insert_row(self, after_row: int) -> None:
+        new_cells = {}
+        for (r, c), data in self.cells.items():
+            new_cells[(r + 1 if r > after_row else r, c)] = data
+        self.cells = new_cells
+        new_merged = []
+        for r1, c1, r2, c2 in self.merged:
+            if r1 > after_row and r2 > after_row:
+                new_merged.append((r1 + 1, c1, r2 + 1, c2))
+            elif r1 <= after_row < r2:
+                new_merged.append((r1, c1, r2 + 1, c2))
+            else:
+                new_merged.append((r1, c1, r2, c2))
+        self.merged = new_merged
+        new_heights = {}
+        for r, h in self.row_heights.items():
+            new_heights[r + 1 if r > after_row else r] = h
+        self.row_heights = new_heights
+        self.max_row += 1
+
+    def bulk_insert_rows(self, after_rows: list[int]) -> dict[int, int]:
+        after_rows = sorted(after_rows)
+        total = len(after_rows)
+
+        new_cells = {}
+        for (r, c), data in self.cells.items():
+            shift = sum(1 for ar in after_rows if ar < r)
+            new_cells[(r + shift, c)] = data
+        self.cells = new_cells
+
+        new_merged = []
+        for r1, c1, r2, c2 in self.merged:
+            s1 = sum(1 for ar in after_rows if ar < r1)
+            s2 = sum(1 for ar in after_rows if ar < r2)
+            new_merged.append((r1 + s1, c1, r2 + s2, c2))
+        self.merged = new_merged
+
+        new_heights = {}
+        for r, h in self.row_heights.items():
+            shift = sum(1 for ar in after_rows if ar < r)
+            new_heights[r + shift] = h
+        self.row_heights = new_heights
+
+        self.max_row += total
+
+        final_positions = {}
+        for ar in after_rows:
+            shift_above = sum(1 for a in after_rows if a < ar)
+            final_positions[ar] = ar + 1 + shift_above
+        return final_positions
+
+    def remove_range(self, start: int, end: int) -> None:
+        for r in range(end, start - 1, -1):
+            self.remove_row(r)
+
+    def clone_row_style(self, from_row: int, to_row: int) -> None:
+        for c, data in self.get_row(from_row).items():
+            key = (to_row, c)
+            self.cells[key] = CellData(
+                value=None,
+                font=copy(data.font),
+                fill=copy(data.fill),
+                border=copy(data.border),
+                alignment=copy(data.alignment),
+                number_format=data.number_format,
+            )
 
     def render(self, ws: openpyxl.worksheet.worksheet.Worksheet):
         for mr in list(ws.merged_cells.ranges):
@@ -296,7 +389,8 @@ def interactive_prompt() -> argparse.Namespace:
     print("  5) Check     — preview pending changes", file=sys.stderr)
     print("  6) Sync      — update schedules", file=sys.stderr)
     print("  7) Collect   — scan departs/*.xlsx → schedule sheet", file=sys.stderr)
-    choice = input("Enter number [1-7]: ").strip()
+    print("  8) Merge     — merge Clean + schedule + first-sheet-table2 → Final", file=sys.stderr)
+    choice = input("Enter number [1-8]: ").strip()
 
     args = argparse.Namespace()
     match choice:
@@ -320,6 +414,8 @@ def interactive_prompt() -> argparse.Namespace:
             except ValueError:
                 print(f"Invalid number: {wd}", file=sys.stderr)
                 sys.exit(1)
+        case "8":
+            args.mode = "merge"
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
             sys.exit(1)
@@ -580,6 +676,196 @@ def cmd_collect(working_days: int) -> None:
     print(f"Done. Created sheet 'schedule' in {SCHEDULES_FILE.name}.", file=sys.stderr)
 
 
+# ── Merge (Clean + schedule + first sheet) ────────────────────
+def _find_sep_idx(ws) -> int | None:
+    for i, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column)):
+        if all(c.value is None for c in row):
+            return i
+    return None
+
+
+def _parse_schedule_sheet(ws) -> list[dict]:
+    employees = []
+    for r in range(1, (ws.max_row or 0) + 1):
+        fio_raw = str(ws.cell(row=r, column=2).value or "")
+        fio = normalize_fio(fio_raw)
+        if not fio:
+            continue
+        data = []
+        for c in range(3, (ws.max_column or 0) + 1):
+            data.append(ws.cell(row=r, column=c).value)
+        employees.append({"fio": fio, "data": data})
+    return employees
+
+
+def _parse_t1_employees(ws, sep_idx, mapping) -> list[dict]:
+    employees = []
+    for r in range(2, sep_idx):
+        row_num = r + 1
+        num_val = ws.cell(row=row_num, column=1).value
+        fio_raw = str(ws.cell(row=row_num, column=2).value or "")
+        if num_val is None:
+            continue
+        fio = normalize_fio(fio_raw)
+        if fio:
+            employees.append({"row_num": row_num, "fio": fio})
+    return employees
+
+
+def cmd_merge() -> None:
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+
+    if "Clean" not in wb.sheetnames:
+        print(f"{RED}Error:{NC} sheet 'Clean' not found — run 'clean' first", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+    if "schedule" not in wb.sheetnames:
+        print(f"{RED}Error:{NC} sheet 'schedule' not found — run 'collect' first", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+
+    ws_first = wb.worksheets[0]
+    ws_clean = wb["Clean"]
+    ws_schedule = wb["schedule"]
+
+    clean_map = SheetMapping(ws_clean)
+    first_map = SheetMapping(ws_first)
+
+    sep_idx = _find_sep_idx(ws_clean)
+    first_sep = _find_sep_idx(ws_first)
+    if sep_idx is None or first_sep is None:
+        print(f"{RED}Error:{NC} cannot find table separator in Clean or first sheet", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+
+    t1_start = 3
+    t1_end = sep_idx
+    t2_clean_start = sep_idx + 2
+    t2_first_start = first_sep + 2
+
+    t1_employees = _parse_t1_employees(ws_clean, sep_idx, clean_map)
+    schedule_employees = _parse_schedule_sheet(ws_schedule)
+
+    if not schedule_employees:
+        print(f"{YELLOW}skip{NC} schedule sheet is empty — nothing to merge", file=sys.stderr)
+        wb.close()
+        return
+    if not t1_employees:
+        print(f"{YELLOW}skip{NC} Clean table 1 is empty — nothing to merge into", file=sys.stderr)
+        wb.close()
+        return
+
+    t1_by_fio = {e["fio"]: e for e in t1_employees}
+    sched_by_fio = {e["fio"]: e for e in schedule_employees}
+
+    matched = set()
+
+    for se in schedule_employees:
+        if se["fio"] in t1_by_fio:
+            matched.add(se["fio"])
+            t1_row = t1_by_fio[se["fio"]]["row_num"]
+            for di, val in enumerate(se["data"]):
+                clean_map.set_cell_value(t1_row, 3 + di, val)
+            print(f"{GREEN}→{NC} {se['fio']} — updated from schedule", file=sys.stderr)
+        else:
+            pass
+
+    orphans = [e for e in t1_employees if e["fio"] not in matched]
+
+    inserts = [se for se in schedule_employees if se["fio"] not in matched]
+    if inserts:
+        existing_sorted = sorted(t1_employees, key=lambda e: e["fio"])
+        insert_plan = []
+        for ins in inserts:
+            fio = ins["fio"]
+            pos = 0
+            for idx, ee in enumerate(existing_sorted):
+                if fio < ee["fio"]:
+                    pos = idx
+                    break
+            else:
+                pos = len(existing_sorted)
+            if pos == 0:
+                after_row = t1_start - 1
+            else:
+                after_row = existing_sorted[pos - 1]["row_num"]
+            insert_plan.append((ins, after_row))
+            existing_sorted.insert(pos, ins)
+
+        all_after_rows = [ar for _, ar in insert_plan]
+        final_positions = clean_map.bulk_insert_rows(all_after_rows)
+
+        red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+        for ins, after_row in insert_plan:
+            new_row = final_positions[after_row]
+
+            for src_row in range(new_row - 1, 0, -1):
+                if clean_map.get_row(src_row):
+                    clean_map.clone_row_style(src_row, new_row)
+                    break
+            else:
+                if t1_employees:
+                    clean_map.clone_row_style(t1_employees[0]["row_num"], new_row)
+
+            clean_map.set_cell_value(new_row, 1, 0)
+            clean_map.set_cell_value(new_row, 2, ins["fio"])
+            for di, val in enumerate(ins["data"]):
+                if val is not None:
+                    clean_map.set_cell_value(new_row, 3 + di, val)
+            clean_map.set_cell_fill(new_row, 1, red_fill)
+            clean_map.set_cell_fill(new_row, 2, red_fill)
+
+            print(f"{GREEN}+{NC} {ins['fio']} — new (red) at row {new_row}", file=sys.stderr)
+
+    for emp in t1_employees:
+        shift = sum(1 for ar in all_after_rows if ar < emp["row_num"])
+        emp["row_num"] += shift
+
+    orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+    for emp in orphans:
+        for col in range(1, clean_map.max_col + 1):
+            clean_map.set_cell_fill(emp["row_num"], col, orange_fill)
+        print(f"{YELLOW}~{NC} {emp['fio']} — orphan (orange)", file=sys.stderr)
+
+    new_sep = (sep_idx + 1) + len(inserts)
+    t2_src_rows = list(range(new_sep + 1, clean_map.max_row + 1))
+    for r in reversed(t2_src_rows):
+        clean_map.remove_row(r)
+
+    t2_target_start = clean_map.max_row + 2
+    first_max_col = first_map.max_col
+    for src_row in range(t2_first_start, first_map.max_row + 1):
+        dst_row = t2_target_start + (src_row - t2_first_start)
+        if dst_row > clean_map.max_row:
+            clean_map.max_row = dst_row
+        for src_key, src_data in first_map.cells.items():
+            if src_key[0] == src_row:
+                clean_map.cells[(dst_row, src_key[1])] = CellData(
+                    value=copy(src_data.value),
+                    font=copy(src_data.font),
+                    fill=copy(src_data.fill),
+                    border=copy(src_data.border),
+                    alignment=copy(src_data.alignment),
+                    number_format=src_data.number_format,
+                )
+        clean_map.max_col = max(clean_map.max_col, first_max_col)
+
+    for r1, c1, r2, c2 in first_map.merged:
+        if r1 >= t2_first_start:
+            offset = t2_target_start - t2_first_start
+            clean_map.merged.append((r1 + offset, c1, r2 + offset, c2))
+
+    if "Final" in wb.sheetnames:
+        del wb["Final"]
+    ws_final = wb.create_sheet("Final")
+    clean_map.render(ws_final)
+    _renumber_column_a(ws_final)
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+    print(f"Done. Merged data written to sheet 'Final'.", file=sys.stderr)
+
+
 # ── Main ─────────────────────────────────────────────────────
 def main() -> None:
     print_summary()
@@ -621,9 +907,11 @@ def main() -> None:
                 print("Error: collect requires working days argument (e.g. collect 30)", file=sys.stderr)
                 sys.exit(1)
         cmd_collect(wd)
+    elif ns.mode in ("merge", "mrg"):
+        cmd_merge()
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: current, employees, diff, clean, check, collect, sync", file=sys.stderr)
+        print("  Valid modes: current, employees, diff, clean, check, collect, sync, merge", file=sys.stderr)
         sys.exit(1)
 
 
