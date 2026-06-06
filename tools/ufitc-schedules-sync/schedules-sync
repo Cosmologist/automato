@@ -76,6 +76,10 @@ def normalize_fio(name: str) -> str:
     return name.strip().replace("ё", "е").replace("Ё", "Е")
 
 
+def fio_key(name: str) -> str:
+    return normalize_fio(name).lower()
+
+
 def clean_fio_cell(val: Any) -> str:
     s = str(val) if val is not None else ""
     s = re.sub(r"\(ученик\)", "", s)
@@ -439,15 +443,15 @@ def cmd_employees() -> None:
 def cmd_diff() -> None:
     sched = get_all_employees()
     emp = parse_employees(EMPLOYEES_FILE)
-    emp_by_fio = {e["fio"]: e for e in emp}
+    emp_by_fio = {fio_key(e["fio"]): e for e in emp}
 
     rows: list[tuple[str, str, str, str]] = []  # (sched_fio, emp_fio, label, color)
 
     i = j = 0
     while i < len(sched) and j < len(emp):
-        cmp = (sched[i]["fio"] > emp[j]["fio"]) - (sched[i]["fio"] < emp[j]["fio"])
+        cmp = (fio_key(sched[i]["fio"]) > fio_key(emp[j]["fio"])) - (fio_key(sched[i]["fio"]) < fio_key(emp[j]["fio"]))
         if cmp == 0:
-            label = emp_by_fio[sched[i]["fio"]].get("label", "")
+            label = emp_by_fio[fio_key(sched[i]["fio"])].get("label", "")
             rows.append((sched[i]["fio"], emp[j]["fio"], label, ""))
             i += 1
             j += 1
@@ -520,10 +524,10 @@ def _renumber_column_a(ws) -> None:
 
 def cmd_clean() -> None:
     docx_employees = parse_employees(EMPLOYEES_FILE)
-    docx_fios = {e["fio"] for e in docx_employees}
+    docx_fios = {fio_key(e["fio"]) for e in docx_employees}
 
     sched_employees = get_all_employees()
-    to_remove = [e for e in sched_employees if e["fio"] not in docx_fios]
+    to_remove = [e for e in sched_employees if fio_key(e["fio"]) not in docx_fios]
     to_remove.sort(key=lambda e: e["row_num"], reverse=True)
 
     if not to_remove:
@@ -755,32 +759,32 @@ def cmd_merge() -> None:
         wb.close()
         return
 
-    t1_by_fio = {e["fio"]: e for e in t1_employees}
-    sched_by_fio = {e["fio"]: e for e in schedule_employees}
+    t1_by_fio = {fio_key(e["fio"]): e for e in t1_employees}
+    sched_by_fio = {fio_key(e["fio"]): e for e in schedule_employees}
 
     matched = set()
 
     for se in schedule_employees:
-        if se["fio"] in t1_by_fio:
-            matched.add(se["fio"])
-            t1_row = t1_by_fio[se["fio"]]["row_num"]
+        if fio_key(se["fio"]) in t1_by_fio:
+            matched.add(fio_key(se["fio"]))
+            t1_row = t1_by_fio[fio_key(se["fio"])]["row_num"]
             for di, val in enumerate(se["data"]):
                 clean_map.set_cell_value(t1_row, 3 + di, val)
             print(f"{GREEN}→{NC} {se['fio']} — updated from schedule", file=sys.stderr)
         else:
             pass
 
-    orphans = [e for e in t1_employees if e["fio"] not in matched]
+    orphans = [e for e in t1_employees if fio_key(e["fio"]) not in matched]
 
-    inserts = [se for se in schedule_employees if se["fio"] not in matched]
+    inserts = [se for se in schedule_employees if fio_key(se["fio"]) not in matched]
     if inserts:
-        existing_sorted = sorted(t1_employees, key=lambda e: e["fio"])
+        existing_sorted = sorted(t1_employees, key=lambda e: fio_key(e["fio"]))
         insert_plan = []
         for ins in inserts:
-            fio = ins["fio"]
+            fio_key_val = fio_key(ins["fio"])
             pos = 0
             for idx, ee in enumerate(existing_sorted):
-                if fio < ee["fio"]:
+                if fio_key_val < fio_key(ee["fio"]):
                     pos = idx
                     break
             else:
@@ -855,6 +859,13 @@ def cmd_merge() -> None:
         if r1 >= t2_first_start:
             offset = t2_target_start - t2_first_start
             clean_map.merged.append((r1 + offset, c1, r2 + offset, c2))
+
+    ref_height = first_map.row_heights.get(3)
+    if ref_height:
+        for r in range(3, new_sep):
+            clean_map.row_heights[r] = ref_height
+        for r in range(t2_target_start + 2, clean_map.max_row + 1):
+            clean_map.row_heights[r] = ref_height
 
     if "Final" in wb.sheetnames:
         del wb["Final"]
