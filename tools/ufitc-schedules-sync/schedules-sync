@@ -197,17 +197,17 @@ class SheetMapping:
             w = ws.column_dimensions[get_column_letter(c)].width
             if w:
                 self.col_widths[c] = w
-        for row in ws.iter_rows(min_row=1, max_row=self.max_row, max_col=self.max_col):
-            for cell in row:
-                if cell.value is not None:
-                    self.cells[(cell.row, cell.column)] = CellData(
-                        value=copy(cell.value),
-                        font=copy(cell.font),
-                        fill=copy(cell.fill),
-                        border=copy(cell.border),
-                        alignment=copy(cell.alignment),
-                        number_format=cell.number_format,
-                    )
+        for (r, c), cell in ws._cells.items():
+            if r > self.max_row or c > self.max_col:
+                continue
+            self.cells[(r, c)] = CellData(
+                value=copy(cell.value),
+                font=copy(cell.font),
+                fill=copy(cell.fill),
+                border=copy(cell.border),
+                alignment=copy(cell.alignment),
+                number_format=cell.number_format,
+            )
 
     def remove_row(self, row_num: int):
         keys = [(r, c) for (r, c) in self.cells if r == row_num]
