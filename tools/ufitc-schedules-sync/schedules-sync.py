@@ -69,8 +69,8 @@ def normalize_name(name: str) -> str:
         return ""
     name = str(name)
     name = name.replace("\xa0", " ")
+    name = name.replace("ё", "е").replace("Ё", "Е")
     name = name.rstrip(",")
-    import re
     name = re.sub(r"\s+", " ", name).strip()
     return name
 
