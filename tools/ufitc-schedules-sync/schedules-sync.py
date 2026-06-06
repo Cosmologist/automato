@@ -21,6 +21,7 @@ from pathlib import Path
 
 try:
     import openpyxl
+    from openpyxl.utils import get_column_letter
 except ImportError:
     sys.exit("Error: openpyxl not installed. Run: pip3 install openpyxl")
 
@@ -266,9 +267,31 @@ def cmd_clean():
     wb = openpyxl.load_workbook(str(SCHEDULES_FILE), keep_vba=True)
     ws = wb[SHEET_NAME]
 
-    rows_to_delete = sorted([row_num for row_num, _ in to_remove], reverse=True)
+    rows_to_delete = sorted([row_num for row_num, _ in to_remove])
 
-    for row_num in rows_to_delete:
+    merges_to_unmerge = []
+    merges_to_shift = []
+
+    for merge in list(ws.merged_cells.ranges):
+        overlaps = any(r >= merge.min_row and r <= merge.max_row for r in rows_to_delete)
+        if overlaps:
+            merges_to_unmerge.append(str(merge))
+        else:
+            rows_before = sum(1 for r in rows_to_delete if r < merge.min_row)
+            if rows_before > 0:
+                merges_to_shift.append((str(merge), merge, rows_before))
+
+    for m in merges_to_unmerge:
+        ws.unmerge_cells(m)
+
+    for orig_str, merge, rows_before in merges_to_shift:
+        ws.unmerge_cells(orig_str)
+        new_min_row = merge.min_row - rows_before
+        new_max_row = merge.max_row - rows_before
+        new_range = f'{get_column_letter(merge.min_col)}{new_min_row}:{get_column_letter(merge.max_col)}{new_max_row}'
+        ws.merge_cells(new_range)
+
+    for row_num in reversed(rows_to_delete):
         ws.delete_rows(row_num, 1)
 
     wb.save(str(SCHEDULES_FILE))
