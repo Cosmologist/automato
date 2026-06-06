@@ -365,6 +365,29 @@ def cmd_sync() -> None:
     print("Sync mode — updating schedules...", file=sys.stderr)
 
 
+def _renumber_column_a(ws) -> None:
+    """Renumber column A for each table (1-based, per table)."""
+    empty_row = None
+    for r in range(1, ws.max_row + 1):
+        if all(ws.cell(row=r, column=c).value is None for c in range(1, ws.max_column + 1)):
+            empty_row = r
+            break
+    if empty_row is None:
+        return
+
+    num = 1
+    for r in range(3, empty_row):
+        if ws.cell(row=r, column=1).value is not None:
+            ws.cell(row=r, column=1).value = num
+            num += 1
+
+    num = 1
+    for r in range(empty_row + 2, ws.max_row + 1):
+        if ws.cell(row=r, column=1).value is not None:
+            ws.cell(row=r, column=1).value = num
+            num += 1
+
+
 def cmd_clean() -> None:
     docx_employees = parse_employees(EMPLOYEES_FILE)
     docx_fios = {e["fio"] for e in docx_employees}
@@ -391,6 +414,8 @@ def cmd_clean() -> None:
         del wb[sheet_name]
     ws_new = wb.create_sheet(sheet_name)
     sm.render(ws_new)
+    print("Renumbering column A...", file=sys.stderr)
+    _renumber_column_a(ws_new)
 
     wb.save(SCHEDULES_FILE)
     wb.close()
