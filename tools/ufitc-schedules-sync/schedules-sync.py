@@ -294,9 +294,25 @@ def cmd_clean():
     for row_num in reversed(rows_to_delete):
         ws.delete_rows(row_num, 1)
 
+    table2_header_row = None
+    for merge in ws.merged_cells.ranges:
+        cell_val = ws.cell(merge.min_row, merge.min_col).value
+        if cell_val and "НЕТРУДОУСТРОЕННЫЕ" in str(cell_val):
+            table2_header_row = merge.min_row
+            break
+
+    if table2_header_row:
+        for r in range(table2_header_row + 1, ws.max_row + 1):
+            cell = ws.cell(r, 1)
+            if cell.value and str(cell.value).startswith("=ROW("):
+                new_formula = f"=ROW(A{r})-{table2_header_row}"
+                cell.value = new_formula
+
     wb.save(str(SCHEDULES_FILE))
     print()
     print(f"Removed {len(to_remove)} employees from {SCHEDULES_FILE.name}")
+    if table2_header_row:
+        print(f"Recalculated numbering for table 2 (header at row {table2_header_row})")
     print("Done.")
 
 
