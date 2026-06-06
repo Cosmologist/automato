@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""
+schedules-sync — actualize employee schedule Excel file based on working files.
+
+Working files (./var/ufitc-schedules-sync/):
+  - schedules.xlsm  — schedule for the previous month (1 employee = 1 row, starts row 3)
+  - employees.docx   — current employee list in a Word table (sorted alphabetically)
+
+Usage:
+  ./schedules-sync.py employees   — show employee list from employees.docx
+  ./schedules-sync.py schedule    — show employee list from schedules.xlsm
+  ./schedules-sync.py diff        — show diff between schedule and employee list
+  ./schedules-sync.py             — interactive mode selection
+"""
+
+import sys
+import re
+import argparse
+from pathlib import Path
+
+try:
+    import openpyxl
+except ImportError:
+    sys.exit("Error: openpyxl not installed. Run: pip3 install openpyxl")
+
+try:
+    import docx
+except ImportError:
+    sys.exit("Error: python-docx not installed. Run: pip3 install python-docx")
+
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "var" / "ufitc-schedules-sync"
+SCHEDULES_FILE = DATA_DIR / "schedules.xlsm"
+EMPLOYEES_FILE = DATA_DIR / "employees.docx"
+SHEET_NAME = "Лист2"
+
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+NC = "\033[0m"
+BOLD = "\033[1m"
+
+
+def print_summary():
+    print("=" * 60)
+    print("schedules-sync — actualize employee schedule")
+    print("=" * 60)
+    print()
+    print("Synchronizes schedules.xlsm with the current employee list")
+    print(f"from {DATA_DIR}/")
+    print()
+    print("Modes:")
+    print("  employees   — show employee list from employees.docx")
+    print("  schedule    — show employee list from schedules.xlsm")
+    print("  diff        — show diff between schedule and employee list")
+    print()
+    print("Usage examples:")
+    print(f"  ./{Path(__file__).name} employees")
+    print(f"  ./{Path(__file__).name} schedule")
+    print(f"  ./{Path(__file__).name} diff")
+    print(f"  ./{Path(__file__).name}              # interactive mode")
+    print("=" * 60)
+    print()
+
+
+def normalize_name(name: str) -> str:
+    if not name:
+        return ""
+    name = str(name)
+    name = name.replace("\xa0", " ")
+    name = name.rstrip(",")
+    import re
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
+
+def load_employees_docx(path: Path) -> list[str]:
+    doc = docx.Document(str(path))
+    table = doc.tables[0]
+    employees = []
+    for i, row in enumerate(table.rows):
+        if i == 0:
+            continue
+        raw = row.cells[1].text.strip()
+        name = normalize_name(raw)
+        if name:
+            employees.append(name)
+    return employees
+
+
+def cmd_employees():
+    if not EMPLOYEES_FILE.exists():
+        sys.exit(f"Error: {EMPLOYEES_FILE} not found")
+
+    print(f"Loading employees from {CYAN}{EMPLOYEES_FILE.name}{NC}...")
+    employees = load_employees_docx(EMPLOYEES_FILE)
+    print(f"  Found {BOLD}{len(employees)}{NC} employees")
+    print()
+    print(f"{BOLD}{'#':>4}  {'Full Name':<40}{NC}")
+    print("-" * 46)
+    for i, name in enumerate(employees, 1):
+        print(f"{i:>4}  {name}")
+    print()
+
+
+def load_schedules_xlsm(path: Path) -> list[str]:
+    wb = openpyxl.load_workbook(str(path), read_only=True, keep_vba=True)
+    ws = wb[SHEET_NAME]
+    employees = []
+    for row in ws.iter_rows(min_row=3, max_col=2):
+        cell = row[1]
+        if cell.value is None or str(cell.value).strip() == "":
+            break
+        name = normalize_name(str(cell.value))
+        if name:
+            employees.append(name)
+    wb.close()
+    return employees
+
+
+def cmd_schedule():
+    if not SCHEDULES_FILE.exists():
+        sys.exit(f"Error: {SCHEDULES_FILE} not found")
+
+    print(f"Loading schedule from {CYAN}{SCHEDULES_FILE.name}{NC}...")
+    employees = load_schedules_xlsm(SCHEDULES_FILE)
+    print(f"  Found {BOLD}{len(employees)}{NC} employees")
+    print()
+    print(f"{BOLD}{'#':>4}  {'Full Name':<40}{NC}")
+    print("-" * 46)
+    for i, name in enumerate(employees, 1):
+        print(f"{i:>4}  {name}")
+    print()
+
+
+def build_diff_pairs(schedules: list[str], employees: list[str]) -> list[tuple[str | None, str | None]]:
+    schedules_sorted = sorted(schedules, key=str.lower)
+    employees_sorted = sorted(employees, key=str.lower)
+    employees_set = set(employees_sorted)
+    schedules_set = set(schedules_sorted)
+
+    pairs: list[tuple[str | None, str | None]] = []
+
+    for name in schedules_sorted:
+        if name in employees_set:
+            pairs.append((name, name))
+        else:
+            pairs.append((name, None))
+
+    for name in employees_sorted:
+        if name not in schedules_set:
+            inserted = False
+            for i, pair in enumerate(pairs):
+                pair_name = pair[0] if pair[0] is not None else pair[1]
+                if pair_name.lower() > name.lower():
+                    pairs.insert(i, (None, name))
+                    inserted = True
+                    break
+            if not inserted:
+                pairs.append((None, name))
+
+    return pairs
+
+
+def cmd_diff():
+    if not SCHEDULES_FILE.exists():
+        sys.exit(f"Error: {SCHEDULES_FILE} not found")
+    if not EMPLOYEES_FILE.exists():
+        sys.exit(f"Error: {EMPLOYEES_FILE} not found")
+
+    print(f"Loading schedule from {CYAN}{SCHEDULES_FILE.name}{NC}...")
+    schedules = load_schedules_xlsm(SCHEDULES_FILE)
+    print(f"  Found {BOLD}{len(schedules)}{NC} employees")
+
+    print(f"Loading employees from {CYAN}{EMPLOYEES_FILE.name}{NC}...")
+    employees = load_employees_docx(EMPLOYEES_FILE)
+    print(f"  Found {BOLD}{len(employees)}{NC} employees")
+
+    pairs = build_diff_pairs(schedules, employees)
+
+    matched = sum(1 for s, e in pairs if s is not None and e is not None)
+    only_schedule = sum(1 for s, e in pairs if s is not None and e is None)
+    only_employees = sum(1 for s, e in pairs if s is None and e is not None)
+
+    print()
+    print(f"  {GREEN}Matched:{NC} {matched}")
+    print(f"  {RED}Only in schedule:{NC} {only_schedule}")
+    print(f"  {YELLOW}Only in employees:{NC} {only_employees}")
+    print()
+    print(f"{BOLD}{'#':>4}  {'schedule.xlsm':<40}  {'employees.docx':<40}{NC}")
+    print("-" * 88)
+    for i, (s, e) in enumerate(pairs, 1):
+        if s is not None and e is not None:
+            color = GREEN
+        elif s is not None:
+            color = RED
+        else:
+            color = YELLOW
+        s_display = s if s else ""
+        e_display = e if e else ""
+        print(f"{i:>4}  {color}{s_display:<40}{NC}  {color}{e_display:<40}{NC}")
+    print()
+
+
+def interactive_mode() -> str:
+    modes = [
+        ("employees", "Show employee list from employees.docx"),
+        ("schedule", "Show employee list from schedules.xlsm"),
+        ("diff", "Show diff between schedule and employee list"),
+    ]
+    print("Available modes:")
+    for i, (name, desc) in enumerate(modes, 1):
+        print(f"  {i}. {name:10s} — {desc}")
+    print()
+    while True:
+        try:
+            choice = input("Enter mode number (1): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(0)
+        if choice == "" or choice == "1":
+            return "employees"
+        if choice == "2":
+            return "schedule"
+        if choice == "3":
+            return "diff"
+        print("Invalid choice. Enter 1, 2 or 3.")
+
+
+def main():
+    print_summary()
+
+    parser = argparse.ArgumentParser(description="Actualize employee schedule")
+    parser.add_argument("mode", nargs="?", help="Operation mode")
+    args = parser.parse_args()
+
+    mode = args.mode
+    if mode is None:
+        mode = interactive_mode()
+
+    if mode == "employees":
+        cmd_employees()
+    elif mode == "schedule":
+        cmd_schedule()
+    elif mode == "diff":
+        cmd_diff()
+    else:
+        sys.exit(f"Unknown mode: {mode}")
+
+
+if __name__ == "__main__":
+    main()
