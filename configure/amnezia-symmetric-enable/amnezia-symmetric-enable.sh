@@ -42,17 +42,19 @@ die() {
 }
 
 amnezia_service() {
-  for svc in amneziawg@wg0.service amneziawg-quick@wg0.service wg-quick@wg0.service; do
+  for svc in awg-quick@wg0.service amneziawg@wg0.service amneziawg-quick@wg0.service wg-quick@wg0.service; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
       echo "$svc"
       return 0
     fi
   done
 
-  if systemctl is-enabled --quiet amneziawg@wg0.service 2>/dev/null ||
-     systemctl is-enabled --quiet wg-quick@wg0.service 2>/dev/null; then
-    return 0
-  fi
+  for svc in awg-quick@wg0.service amneziawg@wg0.service wg-quick@wg0.service; do
+    if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+      echo "$svc"
+      return 0
+    fi
+  done
 
   return 1
 }
@@ -99,10 +101,10 @@ PostUp = ip route add ${mask} dev ${iface} table ${table}
 PostUp = ip route add default via ${gateway} dev ${iface} table ${table}
 
 # При отключении amneziawg - удаляем все что создали
-PreDown = ip rule del fwmark ${mark} table ${table} priority ${PRIORITY} 2>/dev/null  true
-PreDown = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null  true
-PreDown = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null  true
-PreDown = ip route flush table ${table} 2>/dev/null  true
+PreDown = ip rule del fwmark ${mark} table ${table} priority ${PRIORITY} 2>/dev/null || true
+PreDown = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null || true
+PreDown = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || true
+PreDown = ip route flush table ${table} 2>/dev/null || true
 #
 $end
 
