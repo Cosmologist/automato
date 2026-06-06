@@ -20,10 +20,7 @@ Displays network information about the current machine.
 Usage:
   $SCRIPT_NAME [--allow-no-result] [--all] active   — Print primary interface (or all with --all)
   $SCRIPT_NAME [--allow-no-result] [--all] ifaces   — List interfaces (physical only, or all with --all)
-  $SCRIPT_NAME [--allow-no-result] priority <up|down> <pattern> — Find ip rule priority by pattern
   $SCRIPT_NAME [--allow-no-result] mark                        — Print a free iptables fwmark value (hex)
-  $SCRIPT_NAME [--allow-no-result] table                       — Print a free routing table number
-  $SCRIPT_NAME [--allow-no-result] mask      [<interface>]     — Print subnet (CIDR) for an interface
   $SCRIPT_NAME [--allow-no-result] gateway   [<interface>]     — Print gateway for an interface
   $SCRIPT_NAME [--allow-no-result] env       [<interface>]     — Print export statements for all modes
 
@@ -34,10 +31,7 @@ Examples:
   IFACE=\$($SCRIPT_NAME active)
   $SCRIPT_NAME ifaces                     # => eno1, enp0s31f6, ...
   $SCRIPT_NAME ifaces --all               # => lo, eno1, wg0, ...
-  $SCRIPT_NAME priority down 'not from all fwmark.*lookup 51820'  # => 32760
   $SCRIPT_NAME mark                       # => 0x100
-  $SCRIPT_NAME table                      # => 1
-  $SCRIPT_NAME mask                       # uses active interface
   $SCRIPT_NAME gateway eno1               # => 192.168.1.1
   eval "\$($SCRIPT_NAME env)"
 
@@ -142,49 +136,6 @@ cmd_ifaces() {
   fi
 }
 
-# ── Mode: priority ────────────────────────────────────────────
-cmd_priority() {
-  local direction="$1"
-  local pattern="$2"
-
-  if [ -z "$direction" ] || [ -z "$pattern" ]; then
-    echo "Usage: $SCRIPT_NAME priority <up|down> <grep-pattern>" >&2
-    echo "  up   — print priority of ip rule matching pattern" >&2
-    echo "  down — print priority one below the matched rule" >&2
-    echo "" >&2
-    echo "Examples:" >&2
-    echo "  $SCRIPT_NAME priority down 'not from all fwmark.*lookup 51820'" >&2
-    echo "  => 32760 (one below AmneziaWG rule at 32761)" >&2
-    return 1
-  fi
-
-  local matched_prio
-  matched_prio=$(ip rule show 2>/dev/null | grep -P "$pattern" | head -1 | grep -oP '^\d+')
-
-  if [ -z "$matched_prio" ]; then
-    no_result "No ip rule matching pattern: $pattern"
-  fi
-
-  case "$direction" in
-    up)
-      echo "Matched priority: $matched_prio" >&2
-      echo "$matched_prio"
-      ;;
-    down)
-      local new_prio=$((matched_prio - 1))
-      if [ "$new_prio" -lt 0 ]; then
-        no_result "Cannot go below priority 0 (matched $matched_prio)"
-      fi
-      echo "Priority below $matched_prio: $new_prio" >&2
-      echo "$new_prio"
-      ;;
-    *)
-      echo "Invalid direction: $direction (use 'up' or 'down')" >&2
-      return 1
-      ;;
-  esac
-}
-
 # ── Mode: mark ───────────────────────────────────────────────
 cmd_mark() {
   echo "Scanning for free iptables fwmark..." >&2
@@ -229,75 +180,6 @@ cmd_mark() {
   no_result "No free fwmark found in range 0x100–0xffff"
 }
 
-# ── Mode: table ──────────────────────────────────────────────
-cmd_table() {
-  echo "Scanning for free routing table number..." >&2
-
-  local -A used
-  local line num
-
-  # Read iproute2 table definition files
-  for f in /etc/iproute2/rt_tables /run/iproute2/rt_tables; do
-    if [ -f "$f" ]; then
-      while IFS=' ' read -r num _; do
-        [[ "$num" =~ ^[0-9]+$ ]] && used[$num]=1
-      done < "$f"
-    fi
-  done
-
-  # Collect table numbers from routing rules and routes
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    used[$line]=1
-  done < <(ip route show table all 2>/dev/null | grep -oP 'table \K[0-9]+' | sort -u) || true
-
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    used[$line]=1
-  done < <(ip rule show 2>/dev/null | grep -oP 'lookup \K[0-9]+') || true
-
-  # Reserved tables: 0 (unspec), 253 (default), 254 (main), 255 (local)
-  used[0]=1
-  used[253]=1
-  used[254]=1
-  used[255]=1
-
-  # Find gaps in used set: scan 1–252, then find next gap from sorted used values
-  local max_used=0
-  local sorted
-  sorted=$(printf "%s\n" "${!used[@]}" | sort -n)
-
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if [[ -z "${used[$i]:-}" ]]; then
-      echo "Free table: $i" >&2
-      echo "$i"
-      return 0
-    fi
-  done
-
-  # Scan higher ranges by finding gaps between consecutive used values
-  local prev=0
-  while IFS= read -r num; do
-    if [ "$num" -gt "$prev" ] && [ "$prev" -gt 0 ] && [ "$((num - prev))" -gt 1 ]; then
-      local candidate=$((prev + 1))
-      echo "Free table: $candidate" >&2
-      echo "$candidate"
-      return 0
-    fi
-    prev=$num
-  done <<< "$sorted"
-
-  # No gap found; return one past the max
-  local candidate=$((prev + 1))
-  if [ "$candidate" -lt 4294967295 ]; then
-    echo "Free table: $candidate" >&2
-    echo "$candidate"
-    return 0
-  fi
-
-  no_result "No free table number found"
-}
-
 validate_iface() {
   local iface="$1"
   if ! ip link show "$iface" &>/dev/null; then
@@ -320,27 +202,6 @@ prompt_iface() {
     exit 1
   fi
   IFACE="${ifaces[$((choice - 1))]}"
-}
-
-# ── Mode: mask ───────────────────────────────────────────────
-cmd_mask() {
-  local iface="${1:-}"
-  if [ -z "$iface" ]; then
-    iface=$(physical_iface_list | pick_primary)
-    if [ -z "$iface" ]; then
-      no_result "No active interface found"
-    fi
-    echo "Using active interface: $iface" >&2
-  fi
-  validate_iface "$iface"
-  echo "Getting subnet for $iface..." >&2
-  local network
-  network=$(ip route show dev "$iface" 2>/dev/null | awk '/scope link/{print $1; exit}')
-  if [ -z "$network" ]; then
-    no_result "No subnet found for $iface"
-  fi
-  echo "Subnet: $network" >&2
-  echo "$network"
 }
 
 # ── Mode: gateway ────────────────────────────────────────────
@@ -386,12 +247,6 @@ cmd_env() {
   val=$(ALLOW_NO_RESULT=true cmd_mark 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_MARK='$val'"
 
-  val=$(ALLOW_NO_RESULT=true cmd_table 2>/dev/null || true)
-  [ -n "$val" ] && echo "export NETWORK_TABLE='$val'"
-
-  val=$(ALLOW_NO_RESULT=true cmd_mask "$iface" 2>/dev/null || true)
-  [ -n "$val" ] && echo "export NETWORK_MASK='$val'"
-
   val=$(ALLOW_NO_RESULT=true cmd_gateway "$iface" 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_GATEWAY='$val'"
 }
@@ -401,20 +256,16 @@ interactive_prompt() {
   echo "Select mode:" >&2
   echo "  1) active    — Show active physical interface(s)" >&2
   echo "  2) mark      — Show free iptables fwmark" >&2
-  echo "  3) table     — Show free routing table number" >&2
-  echo "  4) mask      — Show subnet for an interface" >&2
-  echo "  5) gateway   — Show gateway for an interface" >&2
-  echo "  6) env       — Export all values as NETWORK_* variables" >&2
-  read -r -p "Enter number [1-6]: " choice </dev/tty
+  echo "  3) gateway   — Show gateway for an interface" >&2
+  echo "  4) env       — Export all values as NETWORK_* variables" >&2
+  read -r -p "Enter number [1-4]: " choice </dev/tty
   echo >&2
 
   case "$choice" in
     1) MODE="active" ;;
     2) MODE="mark" ;;
-    3) MODE="table" ;;
-    4) MODE="mask" ;;
-    5) MODE="gateway" ;;
-    6) MODE="env" ;;
+    3) MODE="gateway" ;;
+    4) MODE="env" ;;
     *)
       echo "Invalid choice: $choice" >&2
       exit 1
@@ -451,17 +302,8 @@ case "$MODE" in
   ifaces | i)
     cmd_ifaces
     ;;
-  priority | p)
-    cmd_priority "${ARGS[1]:-}" "${ARGS[2]:-}"
-    ;;
   mark | m)
     cmd_mark
-    ;;
-  table | t)
-    cmd_table
-    ;;
-  mask)
-    cmd_mask "${ARGS[1]:-}"
     ;;
   gateway | gw)
     cmd_gateway "${ARGS[1]:-}"
@@ -471,7 +313,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "  Valid modes: active, ifaces, priority, mark, table, mask, gateway, env" >&2
+    echo "  Valid modes: active, ifaces, mark, gateway, env" >&2
     exit 1
     ;;
 esac

@@ -11,7 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NET_TOOL="$PROJECT_ROOT/tools/linux-net-tool/net-tool.sh"
 CONFIG_FILE="/etc/amnezia/amneziawg/wg0.conf"
-AMNEZIA_PRIO_PATTERN='not from all fwmark.*lookup 51820'
+MARK="0x100"
+TABLE="10002"
+PRIORITY="32760"
 
 # ── Summary ──────────────────────────────────────────────────
 print_summary() {
@@ -75,7 +77,7 @@ block_end_marker() {
 }
 
 generate_block() {
-  local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5" priority="$6"
+  local iface="$1" subnet="$2" gateway="$3"
   local start end
   start=$(block_start_marker "$iface")
   end=$(block_end_marker "$iface")
@@ -89,28 +91,35 @@ $start
 # Исходящие пакеты ответов на входящие соединения с ethernet (${iface}) - отправляем через этот же интерфейс.
 # Без этого исходящие пакеты завернутся в amnezia и клиенты их никогда не получат.
 #
-# Есть более простой вариант - ip route add ${mask} dev ${iface} metric 50
+# Есть более простой вариант - ip route add ${subnet} dev ${iface} metric 50
 # но он не обрабатывает ситуацию когда входящее соединение идет через интернет и локальную сеть,
 # напрмер обращения к роутеру на котором проброшены порты до сервера.
+#
+# fwmark: ${MARK}, table: ${TABLE}, priority: ${PRIORITY}
+#
+# Если не работает / нет интернета — проверить:
+#   ip rule show | grep '${MARK}'
+#   iptables -t mangle -L PREROUTING -n -v | grep '${MARK}'
+#   iptables -t mangle -L OUTPUT -n -v | grep 'CONNMARK'
+#   ip route show table ${TABLE}
+# Удалить вручную:
+#   ip rule del fwmark ${MARK} table ${TABLE} priority ${PRIORITY}
+#   iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${MARK}
+#   iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark
+#   ip route flush table ${TABLE}
 
 # Применяем при поднятии amneniawg
-# Сначала удаляем старые правила на случай если завершение прошло неудачно
-PostUp = ip rule del fwmark ${mark} table ${table} priority ${priority} 2>/dev/null || true
-PostUp = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null || true
-PostUp = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || true
-PostUp = ip route flush table ${table} 2>/dev/null || true
-# Затем добавляем актуальные
-PostUp = iptables -t mangle -A PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark}
+PostUp = iptables -t mangle -A PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${MARK}
 PostUp = iptables -t mangle -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark
-PostUp = ip rule add fwmark ${mark} table ${table} priority ${priority}
-PostUp = ip route add ${mask} dev ${iface} table ${table}
-PostUp = ip route add default via ${gateway} dev ${iface} table ${table}
+PostUp = ip rule add fwmark ${MARK} table ${TABLE} priority ${PRIORITY}
+PostUp = ip route add ${subnet} dev ${iface} table ${TABLE}
+PostUp = ip route add default via ${gateway} dev ${iface} table ${TABLE}
 
 # При отключении amneziawg - удаляем все что создали
-PreDown = ip rule del fwmark ${mark} table ${table} priority ${priority} 2>/dev/null || true
-PreDown = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null || true
+PreDown = ip rule del fwmark ${MARK} table ${TABLE} priority ${PRIORITY} 2>/dev/null || true
+PreDown = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${MARK} 2>/dev/null || true
 PreDown = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || true
-PreDown = ip route flush table ${table} 2>/dev/null || true
+PreDown = ip route flush table ${TABLE} 2>/dev/null || true
 #
 $end
 
@@ -138,14 +147,14 @@ remove_block() {
 }
 
 insert_block() {
-  local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5" priority="$6"
+  local iface="$1" subnet="$2" gateway="$3"
   local start end block_file
   start=$(block_start_marker "$iface")
   end=$(block_end_marker "$iface")
 
   # Write generated block to a temp file
   block_file=$(mktemp)
-  generate_block "$iface" "$mark" "$table" "$mask" "$gateway" "$priority" > "$block_file"
+  generate_block "$iface" "$subnet" "$gateway" > "$block_file"
 
   # Create file with [Interface] if it doesn't exist
   if [ ! -f "$CONFIG_FILE" ]; then
@@ -201,16 +210,6 @@ detect_active_iface() {
     die "No active interface found and none specified"
   fi
   echo "$iface"
-}
-
-detect_amnezia_priority() {
-  local prio
-  prio=$("$NET_TOOL" priority down "$AMNEZIA_PRIO_PATTERN" 2>/dev/null | tail -1)
-  if [ -z "$prio" ] || ! [[ "$prio" =~ ^[0-9]+$ ]]; then
-    echo "32760"
-  else
-    echo "$prio"
-  fi
 }
 
 # ── Interactive prompt ──────────────────────────────────────
@@ -293,6 +292,68 @@ check_net_tool() {
   return 0
 }
 
+check_conflicts() {
+  local has_conflicts=false
+
+  echo "--- Checking for conflicts ---"
+
+  # Check if fwmark is already in use in ip rules
+  if ip rule show 2>/dev/null | grep -q "fwmark ${MARK}"; then
+    echo -e "  $(printf '%-28s' "ip rule fwmark ${MARK}:") ${RED}conflict${NC}"
+    echo "    To verify these are our rules:"
+    echo "      ip rule show | grep 'fwmark ${MARK}'"
+    echo "    To remove:"
+    echo "      ip rule del fwmark ${MARK} table ${TABLE} priority <PRIO>"
+    has_conflicts=true
+  else
+    echo -e "  $(printf '%-28s' "ip rule fwmark ${MARK}:") ${GREEN}clear${NC}"
+  fi
+
+  # Check if fwmark is already in use in iptables PREROUTING
+  if iptables -t mangle -L PREROUTING -n 2>/dev/null | grep -q "set-mark ${MARK}"; then
+    echo -e "  $(printf '%-28s' "iptables PREROUTING mark ${MARK}:") ${RED}conflict${NC}"
+    echo "    To verify these are our rules:"
+    echo "      iptables -t mangle -L PREROUTING -n | grep '${MARK}'"
+    echo "    To remove:"
+    echo "      iptables -t mangle -D PREROUTING -i <IFACE> -m conntrack --ctstate NEW -j CONNMARK --set-mark ${MARK}"
+    has_conflicts=true
+  else
+    echo -e "  $(printf '%-28s' "iptables PREROUTING mark ${MARK}:") ${GREEN}clear${NC}"
+  fi
+
+  # Check if CONNMARK restore exists in OUTPUT
+  if iptables -t mangle -L OUTPUT -n 2>/dev/null | grep -q "CONNMARK.*restore"; then
+    echo -e "  $(printf '%-28s' "iptables OUTPUT restore:") ${RED}conflict${NC}"
+    echo "    To verify:"
+    echo "      iptables -t mangle -L OUTPUT -n | grep 'CONNMARK'"
+    echo "    To remove:"
+    echo "      iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark"
+    has_conflicts=true
+  else
+    echo -e "  $(printf '%-28s' "iptables OUTPUT restore:") ${GREEN}clear${NC}"
+  fi
+
+  # Check if table has routes
+  if ip route show table ${TABLE} 2>/dev/null | grep -q .; then
+    echo -e "  $(printf '%-28s' "routing table ${TABLE}:") ${RED}conflict${NC}"
+    echo "    To verify these are our routes:"
+    echo "      ip route show table ${TABLE}"
+    echo "    To remove:"
+    echo "      ip route flush table ${TABLE}"
+    has_conflicts=true
+  else
+    echo -e "  $(printf '%-28s' "routing table ${TABLE}:") ${GREEN}clear${NC}"
+  fi
+
+  if $has_conflicts; then
+    echo ""
+    echo -e "${RED}Conflicts found!${NC} Remove existing rules before running this script."
+    return 1
+  fi
+
+  return 0
+}
+
 # ── Main ─────────────────────────────────────────────────────
 print_summary
 
@@ -365,29 +426,33 @@ if ! check_net_tool; then
   die "Pre-flight checks failed"
 fi
 
-# Fetch network parameters from net-tool.sh
+# Get network parameters
 echo "Fetching network parameters for $IFACE..."
 
-NET_MARK=$("$NET_TOOL" mark 2>/dev/null | tail -1) || die "Failed to get free mark"
-NET_TABLE=$("$NET_TOOL" table 2>/dev/null | tail -1) || die "Failed to get free table"
-NET_MASK=$("$NET_TOOL" mask "$IFACE" 2>/dev/null | tail -1) || die "Failed to get subnet for $IFACE"
-NET_GATEWAY=$("$NET_TOOL" gateway "$IFACE" 2>/dev/null | tail -1) || die "Failed to get gateway for $IFACE"
+NET_SUBNET=$(ip route show dev "$IFACE" 2>/dev/null | awk '/scope link/{print $1; exit}')
+[ -z "$NET_SUBNET" ] && die "Failed to get subnet for $IFACE"
+
+NET_GATEWAY=$(ip route show default dev "$IFACE" 2>/dev/null | awk '{print $3}')
+[ -z "$NET_GATEWAY" ] && die "Failed to get gateway for $IFACE"
 
 echo "  Interface: $IFACE"
-echo "  Mark:      $NET_MARK"
-echo "  Table:     $NET_TABLE"
-echo "  Subnet:    $NET_MASK"
+echo "  Subnet:    $NET_SUBNET"
 echo "  Gateway:   $NET_GATEWAY"
-
-NET_PRIORITY=$(detect_amnezia_priority)
-echo "  Priority:  $NET_PRIORITY (below AmneziaWG)"
+echo "  Mark:      $MARK"
+echo "  Table:     $TABLE"
+echo "  Priority:  $PRIORITY"
 echo ""
+
+# Check for conflicts before applying
+if ! check_conflicts; then
+  die "Conflicts found — remove existing rules first"
+fi
 
 WAS_RUNNING=false
 amnezia_running && WAS_RUNNING=true
 
 remove_block "$IFACE"
-insert_block "$IFACE" "$NET_MARK" "$NET_TABLE" "$NET_MASK" "$NET_GATEWAY" "$NET_PRIORITY"
+insert_block "$IFACE" "$NET_SUBNET" "$NET_GATEWAY"
 
 if $WAS_RUNNING && ! $NO_RESTART; then
   echo "Restarting AmneziaWG..."
