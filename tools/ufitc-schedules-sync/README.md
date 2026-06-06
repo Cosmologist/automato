@@ -1,6 +1,6 @@
 # Schedules Sync
 
-Обновляет расписание сотрудников в `schedules.xlsm`.
+Обновляет расписание сотрудников в `schedules.xlsx`.
 
 ## Структура xlsm
 
@@ -31,14 +31,14 @@
 
 ## Режим `diff`
 
-Full outer join списков ФИО из schedules.xlsm и employees.docx:
+Full outer join списков ФИО из schedules.xlsx и employees.docx:
 - совпавшие — default (без цвета)
 - только в schedule — RED
 - только в employees — GREEN
 
 ## Режим `clean`
 
-Удаляет из schedules.xlsm строки сотрудников, у которых нет пары в employees.docx (RED из diff).
+Удаляет из schedules.xlsx строки сотрудников, у которых нет пары в employees.docx (RED из diff).
 Использует `SheetMapping` — удаление через буфер с сохранением стилей/мержей.
 
 ## Парсинг xlsm
@@ -86,7 +86,7 @@ Full outer join списков ФИО из schedules.xlsm и employees.docx:
 3. После нахождения — сбор строк вниз до пустой
 4. Для каждого сотрудника: ФИО + данные на `working_days` колонок вправо
 
-### Рендер в лист `schedule` (schedules.xlsm)
+### Рендер в лист `schedule` (schedules.xlsx)
 - Удаляется старый лист `schedule`, создаётся новый
 - Col A: №, Col B: ФИО, Col C+: часы/статусы
 - Строки без данных (только ФИО) пропускаются

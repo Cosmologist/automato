@@ -19,7 +19,7 @@ from openpyxl.utils import get_column_letter
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCHEDULES_FILE = SCRIPT_DIR / "schedules.xlsm"
+SCHEDULES_FILE = SCRIPT_DIR / "schedules.xlsx"
 EMPLOYEES_FILE = SCRIPT_DIR / "employees.docx"
 DEPARTS_DIR = SCRIPT_DIR / "departs"
 GREEN = "\033[0;32m"
@@ -32,10 +32,10 @@ NC = "\033[0m"
 def print_summary() -> None:
     print(
         f"""--- Schedules Sync ---
-Updates employee schedules in schedules.xlsm based on various data sources.
+Updates employee schedules in schedules.xlsx based on various data sources.
 
 Usage:
-  {Path(sys.argv[0]).name} current         — List all employee names from schedules.xlsm
+  {Path(sys.argv[0]).name} current         — List all employee names from schedules.xlsx
   {Path(sys.argv[0]).name} employees       — List all employee names + labels from employees.docx
   {Path(sys.argv[0]).name} diff            — Compare schedules vs employees (full outer join)
   {Path(sys.argv[0]).name} clean           — Remove from schedules rows without pair in employees
@@ -97,7 +97,7 @@ def is_fio_cell(val: Any) -> bool:
 # ── XLSM parser ──────────────────────────────────────────────
 def parse_schedules(filepath: Path) -> dict:
     """
-    Parse schedules.xlsm and return employee data.
+    Parse schedules.xlsx and return employee data.
 
     Returns
     -------
@@ -382,7 +382,7 @@ class SheetMapping:
 # ── Interactive prompt ──────────────────────────────────────
 def interactive_prompt() -> argparse.Namespace:
     print("Select action:", file=sys.stderr)
-    print("  1) Current   — list names from schedules.xlsm", file=sys.stderr)
+    print("  1) Current   — list names from schedules.xlsx", file=sys.stderr)
     print("  2) Employees — list names + labels from employees.docx", file=sys.stderr)
     print("  3) Diff      — compare schedules vs employees", file=sys.stderr)
     print("  4) Clean     — remove rows without pair in employees", file=sys.stderr)
@@ -618,7 +618,7 @@ def collect_from_file(filepath: Path, working_days: int) -> list[dict] | None:
 
 
 def render_schedule_sheet(employees: list[dict], working_days: int) -> None:
-    """Render collected employees into a new 'schedule' sheet in schedules.xlsm."""
+    """Render collected employees into a new 'schedule' sheet in schedules.xlsx."""
     wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
 
     if "schedule" in wb.sheetnames:
