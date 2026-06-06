@@ -266,8 +266,7 @@ def cmd_clean():
     wb = openpyxl.load_workbook(str(SCHEDULES_FILE), keep_vba=True)
     ws = wb[SHEET_NAME]
 
-    rows_to_delete = [row_num for row_num, _ in to_remove]
-    rows_to_delete.sort(reverse=True)
+    rows_to_delete = sorted([row_num for row_num, _ in to_remove], reverse=True)
 
     for row_num in rows_to_delete:
         ws.delete_rows(row_num, 1)
