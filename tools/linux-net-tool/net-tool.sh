@@ -20,6 +20,7 @@ Displays network information about the current machine.
 Usage:
   $SCRIPT_NAME [--allow-no-result] [--all] active   — Print primary interface (or all with --all)
   $SCRIPT_NAME [--allow-no-result] [--all] ifaces   — List interfaces (physical only, or all with --all)
+  $SCRIPT_NAME [--allow-no-result] priority <up|down> <pattern> — Find ip rule priority by pattern
   $SCRIPT_NAME [--allow-no-result] mark                        — Print a free iptables fwmark value (hex)
   $SCRIPT_NAME [--allow-no-result] table                       — Print a free routing table number
   $SCRIPT_NAME [--allow-no-result] mask      [<interface>]     — Print subnet (CIDR) for an interface
@@ -33,6 +34,7 @@ Examples:
   IFACE=\$($SCRIPT_NAME active)
   $SCRIPT_NAME ifaces                     # => eno1, enp0s31f6, ...
   $SCRIPT_NAME ifaces --all               # => lo, eno1, wg0, ...
+  $SCRIPT_NAME priority down 'not from all fwmark.*lookup 51820'  # => 32760
   $SCRIPT_NAME mark                       # => 0x100
   $SCRIPT_NAME table                      # => 1
   $SCRIPT_NAME mask                       # uses active interface
@@ -138,6 +140,49 @@ cmd_ifaces() {
     echo "Listing physical interfaces..." >&2
     physical_iface_list
   fi
+}
+
+# ── Mode: priority ────────────────────────────────────────────
+cmd_priority() {
+  local direction="$1"
+  local pattern="$2"
+
+  if [ -z "$direction" ] || [ -z "$pattern" ]; then
+    echo "Usage: $SCRIPT_NAME priority <up|down> <grep-pattern>" >&2
+    echo "  up   — print priority of ip rule matching pattern" >&2
+    echo "  down — print priority one below the matched rule" >&2
+    echo "" >&2
+    echo "Examples:" >&2
+    echo "  $SCRIPT_NAME priority down 'not from all fwmark.*lookup 51820'" >&2
+    echo "  => 32760 (one below AmneziaWG rule at 32761)" >&2
+    return 1
+  fi
+
+  local matched_prio
+  matched_prio=$(ip rule show 2>/dev/null | grep -P "$pattern" | head -1 | grep -oP '^\d+')
+
+  if [ -z "$matched_prio" ]; then
+    no_result "No ip rule matching pattern: $pattern"
+  fi
+
+  case "$direction" in
+    up)
+      echo "Matched priority: $matched_prio" >&2
+      echo "$matched_prio"
+      ;;
+    down)
+      local new_prio=$((matched_prio - 1))
+      if [ "$new_prio" -lt 0 ]; then
+        no_result "Cannot go below priority 0 (matched $matched_prio)"
+      fi
+      echo "Priority below $matched_prio: $new_prio" >&2
+      echo "$new_prio"
+      ;;
+    *)
+      echo "Invalid direction: $direction (use 'up' or 'down')" >&2
+      return 1
+      ;;
+  esac
 }
 
 # ── Mode: mark ───────────────────────────────────────────────
@@ -406,6 +451,9 @@ case "$MODE" in
   ifaces | i)
     cmd_ifaces
     ;;
+  priority | p)
+    cmd_priority "${ARGS[1]:-}" "${ARGS[2]:-}"
+    ;;
   mark | m)
     cmd_mark
     ;;
@@ -423,7 +471,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "  Valid modes: active, ifaces, mark, table, mask, gateway, env" >&2
+    echo "  Valid modes: active, ifaces, priority, mark, table, mask, gateway, env" >&2
     exit 1
     ;;
 esac

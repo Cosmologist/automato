@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NET_TOOL="$PROJECT_ROOT/tools/linux-net-tool/net-tool.sh"
 CONFIG_FILE="/etc/amnezia/amneziawg/wg0.conf"
-PRIORITY="32762"
+AMNEZIA_PRIO_PATTERN='not from all fwmark.*lookup 51820'
 
 # ── Summary ──────────────────────────────────────────────────
 print_summary() {
@@ -75,7 +75,7 @@ block_end_marker() {
 }
 
 generate_block() {
-  local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5"
+  local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5" priority="$6"
   local start end
   start=$(block_start_marker "$iface")
   end=$(block_end_marker "$iface")
@@ -95,19 +95,19 @@ $start
 
 # Применяем при поднятии amneniawg
 # Сначала удаляем старые правила на случай если завершение прошло неудачно
-PostUp = ip rule del fwmark ${mark} table ${table} priority ${PRIORITY} 2>/dev/null || true
+PostUp = ip rule del fwmark ${mark} table ${table} priority ${priority} 2>/dev/null || true
 PostUp = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null || true
 PostUp = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || true
 PostUp = ip route flush table ${table} 2>/dev/null || true
 # Затем добавляем актуальные
 PostUp = iptables -t mangle -A PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark}
 PostUp = iptables -t mangle -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark
-PostUp = ip rule add fwmark ${mark} table ${table} priority ${PRIORITY}
+PostUp = ip rule add fwmark ${mark} table ${table} priority ${priority}
 PostUp = ip route add ${mask} dev ${iface} table ${table}
 PostUp = ip route add default via ${gateway} dev ${iface} table ${table}
 
 # При отключении amneziawg - удаляем все что создали
-PreDown = ip rule del fwmark ${mark} table ${table} priority ${PRIORITY} 2>/dev/null || true
+PreDown = ip rule del fwmark ${mark} table ${table} priority ${priority} 2>/dev/null || true
 PreDown = iptables -t mangle -D PREROUTING -i ${iface} -m conntrack --ctstate NEW -j CONNMARK --set-mark ${mark} 2>/dev/null || true
 PreDown = iptables -t mangle -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || true
 PreDown = ip route flush table ${table} 2>/dev/null || true
@@ -138,14 +138,14 @@ remove_block() {
 }
 
 insert_block() {
-  local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5"
+  local iface="$1" mark="$2" table="$3" mask="$4" gateway="$5" priority="$6"
   local start end block_file
   start=$(block_start_marker "$iface")
   end=$(block_end_marker "$iface")
 
   # Write generated block to a temp file
   block_file=$(mktemp)
-  generate_block "$iface" "$mark" "$table" "$mask" "$gateway" > "$block_file"
+  generate_block "$iface" "$mark" "$table" "$mask" "$gateway" "$priority" > "$block_file"
 
   # Create file with [Interface] if it doesn't exist
   if [ ! -f "$CONFIG_FILE" ]; then
@@ -201,6 +201,16 @@ detect_active_iface() {
     die "No active interface found and none specified"
   fi
   echo "$iface"
+}
+
+detect_amnezia_priority() {
+  local prio
+  prio=$("$NET_TOOL" priority down "$AMNEZIA_PRIO_PATTERN" 2>/dev/null | tail -1)
+  if [ -z "$prio" ] || ! [[ "$prio" =~ ^[0-9]+$ ]]; then
+    echo "32760"
+  else
+    echo "$prio"
+  fi
 }
 
 # ── Interactive prompt ──────────────────────────────────────
@@ -368,13 +378,16 @@ echo "  Mark:      $NET_MARK"
 echo "  Table:     $NET_TABLE"
 echo "  Subnet:    $NET_MASK"
 echo "  Gateway:   $NET_GATEWAY"
+
+NET_PRIORITY=$(detect_amnezia_priority)
+echo "  Priority:  $NET_PRIORITY (below AmneziaWG)"
 echo ""
 
 WAS_RUNNING=false
 amnezia_running && WAS_RUNNING=true
 
 remove_block "$IFACE"
-insert_block "$IFACE" "$NET_MARK" "$NET_TABLE" "$NET_MASK" "$NET_GATEWAY"
+insert_block "$IFACE" "$NET_MARK" "$NET_TABLE" "$NET_MASK" "$NET_GATEWAY" "$NET_PRIORITY"
 
 if $WAS_RUNNING && ! $NO_RESTART; then
   echo "Restarting AmneziaWG..."
