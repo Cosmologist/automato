@@ -11,9 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NET_TOOL="$PROJECT_ROOT/tools/linux-net-tool/net-tool.sh"
 CONFIG_FILE="/etc/amnezia/amneziawg/wg0.conf"
-MARK="0x100"
-TABLE="10002"
-PRIORITY="32760"
+MARK=""
+TABLE=""
+PRIORITY=""
 
 # ── Summary ──────────────────────────────────────────────────
 print_summary() {
@@ -450,6 +450,16 @@ NET_SUBNET=$(ip route show dev "$IFACE" 2>/dev/null | awk '/scope link/{print $1
 
 NET_GATEWAY=$(ip route show default dev "$IFACE" 2>/dev/null | awk '{print $3}')
 [ -z "$NET_GATEWAY" ] && die "Failed to get gateway for $IFACE"
+
+# Get dynamic values from net-tool.sh
+MARK=$("$NET_TOOL" mark 2>/dev/null)
+[ -z "$MARK" ] && die "Failed to get free fwmark from net-tool.sh"
+
+TABLE=$("$NET_TOOL" table 2>/dev/null)
+[ -z "$TABLE" ] && die "Failed to get free routing table from net-tool.sh"
+
+PRIORITY=$("$NET_TOOL" priority 2>/dev/null)
+[ -z "$PRIORITY" ] && die "Failed to get free priority from net-tool.sh"
 
 echo "  Interface: $IFACE"
 echo "  Subnet:    $NET_SUBNET"

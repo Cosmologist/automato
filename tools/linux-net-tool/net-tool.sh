@@ -20,7 +20,9 @@ Displays network information about the current machine.
 Usage:
   $SCRIPT_NAME [--allow-no-result] [--all] active   — Print primary interface (or all with --all)
   $SCRIPT_NAME [--allow-no-result] [--all] ifaces   — List interfaces (physical only, or all with --all)
-  $SCRIPT_NAME [--allow-no-result] mark                        — Print a free iptables fwmark value (hex)
+  $SCRIPT_NAME [--allow-no-result] mark             — Print a free iptables fwmark value (hex)
+  $SCRIPT_NAME [--allow-no-result] table            — Print a free routing table number
+  $SCRIPT_NAME [--allow-no-result] priority         — Print a free ip rule priority
   $SCRIPT_NAME [--allow-no-result] gateway   [<interface>]     — Print gateway for an interface
   $SCRIPT_NAME [--allow-no-result] env       [<interface>]     — Print export statements for all modes
 
@@ -32,6 +34,8 @@ Examples:
   $SCRIPT_NAME ifaces                     # => eno1, enp0s31f6, ...
   $SCRIPT_NAME ifaces --all               # => lo, eno1, wg0, ...
   $SCRIPT_NAME mark                       # => 0x100
+  $SCRIPT_NAME table                      # => 10002
+  $SCRIPT_NAME priority                   # => 32760
   $SCRIPT_NAME gateway eno1               # => 192.168.1.1
   eval "\$($SCRIPT_NAME env)"
 
@@ -180,6 +184,65 @@ cmd_mark() {
   no_result "No free fwmark found in range 0x100–0xffff"
 }
 
+# ── Mode: table ───────────────────────────────────────────────
+cmd_table() {
+  echo "Scanning for free routing table..." >&2
+
+  local -A used
+  local line num
+
+  # Collect used tables from ip rule show
+  while IFS= read -r line; do
+    num=$(echo "$line" | grep -oP 'lookup \K[0-9]+' || true)
+    [[ -n "$num" ]] && used[$num]=1
+  done < <(ip rule show 2>/dev/null)
+
+  # Collect used tables from /etc/iproute2/rt_tables
+  if [ -f /etc/iproute2/rt_tables ]; then
+    while IFS= read -r line; do
+      [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+      num=$(echo "$line" | awk '{print $1}')
+      [[ -n "$num" ]] && used[$num]=1
+    done < /etc/iproute2/rt_tables
+  fi
+
+  # Find first free table starting at 10000
+  for ((i = 10000; i <= 65535; i++)); do
+    if [[ -z "${used[$i]:-}" ]]; then
+      echo "Free table: $i" >&2
+      echo "$i"
+      return 0
+    fi
+  done
+
+  no_result "No free routing table found in range 10000–65535"
+}
+
+# ── Mode: priority ────────────────────────────────────────────
+cmd_priority() {
+  echo "Scanning for free ip rule priority..." >&2
+
+  local -A used
+  local line prio
+
+  # Collect used priorities from ip rule show
+  while IFS= read -r line; do
+    prio=$(echo "$line" | grep -oP '^\K[0-9]+' || true)
+    [[ -n "$prio" ]] && used[$prio]=1
+  done < <(ip rule show 2>/dev/null)
+
+  # Find first free priority starting at 32760
+  for ((i = 32760; i <= 32767; i++)); do
+    if [[ -z "${used[$i]:-}" ]]; then
+      echo "Free priority: $i" >&2
+      echo "$i"
+      return 0
+    fi
+  done
+
+  no_result "No free priority found in range 32760–32767"
+}
+
 validate_iface() {
   local iface="$1"
   if ! ip link show "$iface" &>/dev/null; then
@@ -247,6 +310,12 @@ cmd_env() {
   val=$(ALLOW_NO_RESULT=true cmd_mark 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_MARK='$val'"
 
+  val=$(ALLOW_NO_RESULT=true cmd_table 2>/dev/null || true)
+  [ -n "$val" ] && echo "export NETWORK_TABLE='$val'"
+
+  val=$(ALLOW_NO_RESULT=true cmd_priority 2>/dev/null || true)
+  [ -n "$val" ] && echo "export NETWORK_PRIORITY='$val'"
+
   val=$(ALLOW_NO_RESULT=true cmd_gateway "$iface" 2>/dev/null || true)
   [ -n "$val" ] && echo "export NETWORK_GATEWAY='$val'"
 }
@@ -255,17 +324,23 @@ cmd_env() {
 interactive_prompt() {
   echo "Select mode:" >&2
   echo "  1) active    — Show active physical interface(s)" >&2
-  echo "  2) mark      — Show free iptables fwmark" >&2
-  echo "  3) gateway   — Show gateway for an interface" >&2
-  echo "  4) env       — Export all values as NETWORK_* variables" >&2
-  read -r -p "Enter number [1-4]: " choice </dev/tty
+  echo "  2) ifaces    — List interfaces (physical only)" >&2
+  echo "  3) mark      — Show free iptables fwmark" >&2
+  echo "  4) table     — Show free routing table" >&2
+  echo "  5) priority  — Show free ip rule priority" >&2
+  echo "  6) gateway   — Show gateway for an interface" >&2
+  echo "  7) env       — Export all values as NETWORK_* variables" >&2
+  read -r -p "Enter number [1-7]: " choice </dev/tty
   echo >&2
 
   case "$choice" in
     1) MODE="active" ;;
-    2) MODE="mark" ;;
-    3) MODE="gateway" ;;
-    4) MODE="env" ;;
+    2) MODE="ifaces" ;;
+    3) MODE="mark" ;;
+    4) MODE="table" ;;
+    5) MODE="priority" ;;
+    6) MODE="gateway" ;;
+    7) MODE="env" ;;
     *)
       echo "Invalid choice: $choice" >&2
       exit 1
@@ -305,6 +380,12 @@ case "$MODE" in
   mark | m)
     cmd_mark
     ;;
+  table | t)
+    cmd_table
+    ;;
+  priority | p)
+    cmd_priority
+    ;;
   gateway | gw)
     cmd_gateway "${ARGS[1]:-}"
     ;;
@@ -313,7 +394,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "  Valid modes: active, ifaces, mark, gateway, env" >&2
+    echo "  Valid modes: active, ifaces, mark, table, priority, gateway, env" >&2
     exit 1
     ;;
 esac
