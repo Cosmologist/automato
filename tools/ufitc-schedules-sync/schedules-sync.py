@@ -75,7 +75,7 @@ def normalize_name(name: str) -> str:
     return name
 
 
-def load_employees_docx(path: Path) -> list[str]:
+def load_employees_docx(path: Path) -> list[tuple[str, str]]:
     doc = docx.Document(str(path))
     table = doc.tables[0]
     employees = []
@@ -84,8 +84,9 @@ def load_employees_docx(path: Path) -> list[str]:
             continue
         raw = row.cells[1].text.strip()
         name = normalize_name(raw)
+        label = row.cells[2].text.strip()
         if name:
-            employees.append(name)
+            employees.append((name, label))
     return employees
 
 
@@ -97,10 +98,10 @@ def cmd_employees():
     employees = load_employees_docx(EMPLOYEES_FILE)
     print(f"  Found {BOLD}{len(employees)}{NC} employees")
     print()
-    print(f"{BOLD}{'#':>4}  {'Full Name':<40}{NC}")
-    print("-" * 46)
-    for i, name in enumerate(employees, 1):
-        print(f"{i:>4}  {name}")
+    print(f"{BOLD}{'#':>4}  {'Full Name':<40}  {'Label':<15}{NC}")
+    print("-" * 63)
+    for i, (name, label) in enumerate(employees, 1):
+        print(f"{i:>4}  {name:<40}  {label}")
     print()
 
 
@@ -134,19 +135,22 @@ def cmd_schedule():
     print()
 
 
-def build_diff_pairs(schedules: list[str], employees: list[str]) -> list[tuple[str | None, str | None]]:
+def build_diff_pairs(schedules: list[str], employees: list[tuple[str, str]]) -> list[tuple[str | None, str | None, str]]:
+    employees_names = [name for name, _ in employees]
+    employees_labels = {name: label for name, label in employees}
+
     schedules_sorted = sorted(schedules, key=str.lower)
-    employees_sorted = sorted(employees, key=str.lower)
+    employees_sorted = sorted(employees_names, key=str.lower)
     employees_set = set(employees_sorted)
     schedules_set = set(schedules_sorted)
 
-    pairs: list[tuple[str | None, str | None]] = []
+    pairs: list[tuple[str | None, str | None, str]] = []
 
     for name in schedules_sorted:
         if name in employees_set:
-            pairs.append((name, name))
+            pairs.append((name, name, employees_labels.get(name, "")))
         else:
-            pairs.append((name, None))
+            pairs.append((name, None, ""))
 
     for name in employees_sorted:
         if name not in schedules_set:
@@ -154,11 +158,11 @@ def build_diff_pairs(schedules: list[str], employees: list[str]) -> list[tuple[s
             for i, pair in enumerate(pairs):
                 pair_name = pair[0] if pair[0] is not None else pair[1]
                 if pair_name.lower() > name.lower():
-                    pairs.insert(i, (None, name))
+                    pairs.insert(i, (None, name, employees_labels.get(name, "")))
                     inserted = True
                     break
             if not inserted:
-                pairs.append((None, name))
+                pairs.append((None, name, employees_labels.get(name, "")))
 
     return pairs
 
@@ -179,18 +183,18 @@ def cmd_diff():
 
     pairs = build_diff_pairs(schedules, employees)
 
-    matched = sum(1 for s, e in pairs if s is not None and e is not None)
-    only_schedule = sum(1 for s, e in pairs if s is not None and e is None)
-    only_employees = sum(1 for s, e in pairs if s is None and e is not None)
+    matched = sum(1 for s, e, _ in pairs if s is not None and e is not None)
+    only_schedule = sum(1 for s, e, _ in pairs if s is not None and e is None)
+    only_employees = sum(1 for s, e, _ in pairs if s is None and e is not None)
 
     print()
     print(f"  {GREEN}Matched:{NC} {matched}")
     print(f"  {RED}Only in schedule:{NC} {only_schedule}")
     print(f"  {YELLOW}Only in employees:{NC} {only_employees}")
     print()
-    print(f"{BOLD}{'#':>4}  {'schedule.xlsm':<40}  {'employees.docx':<40}{NC}")
-    print("-" * 88)
-    for i, (s, e) in enumerate(pairs, 1):
+    print(f"{BOLD}{'#':>4}  {'schedule.xlsm':<40}  {'employees.docx':<40}  {'Label':<15}{NC}")
+    print("-" * 105)
+    for i, (s, e, label) in enumerate(pairs, 1):
         if s is not None and e is not None:
             color = GREEN
         elif s is not None:
@@ -199,7 +203,7 @@ def cmd_diff():
             color = YELLOW
         s_display = s if s else ""
         e_display = e if e else ""
-        print(f"{i:>4}  {color}{s_display:<40}{NC}  {color}{e_display:<40}{NC}")
+        print(f"{i:>4}  {color}{s_display:<40}{NC}  {color}{e_display:<40}{NC}  {label}")
     print()
 
 
