@@ -33,3 +33,7 @@
 - Table 1: данные rows[2:sep_idx]
 - Table 2: данные rows[sep_idx+2:]
 - Возвращает: `tables[].employees[].{row_num, fio_raw, fio}`
+
+## Единый список
+- `get_all_employees()` — объединяет обе таблицы, сортирует по `fio`
+- Каждый employee содержит `table_index` (0 или 1)

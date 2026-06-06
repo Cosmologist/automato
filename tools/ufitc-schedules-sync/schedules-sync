@@ -115,6 +115,17 @@ def parse_schedules(filepath: Path) -> dict:
     return {"tables": tables, "filepath": str(filepath)}
 
 
+def get_all_employees() -> list[dict]:
+    """Return flat list of all employees from both tables, sorted by fio."""
+    data = parse_schedules(SCHEDULES_FILE)
+    result = []
+    for ti, tbl in enumerate(data["tables"]):
+        for emp in tbl["employees"]:
+            result.append({**emp, "table_index": ti})
+    result.sort(key=lambda e: e["fio"])
+    return result
+
+
 # ── Interactive prompt ──────────────────────────────────────
 def interactive_prompt() -> argparse.Namespace:
     print("Select action:", file=sys.stderr)
@@ -139,11 +150,9 @@ def interactive_prompt() -> argparse.Namespace:
 
 # ── Modes ────────────────────────────────────────────────────
 def cmd_current() -> None:
-    data = parse_schedules(SCHEDULES_FILE)
-    for ti, tbl in enumerate(data["tables"], start=1):
-        print(f"Table {ti}:", file=sys.stderr)
-        for emp in tbl["employees"]:
-            print(emp["fio"])
+    sorted_employees = get_all_employees()
+    for emp in sorted_employees:
+        print(emp["fio"])
 
 
 def cmd_check() -> None:
