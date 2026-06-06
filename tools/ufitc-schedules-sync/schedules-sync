@@ -30,12 +30,14 @@ Updates employee schedules in schedules.xlsm based on various data sources.
 Usage:
   {Path(sys.argv[0]).name} current     — List all employee names from schedules.xlsm
   {Path(sys.argv[0]).name} employees   — List all employee names + labels from employees.docx
+  {Path(sys.argv[0]).name} diff        — Compare schedules vs employees (full outer join)
   {Path(sys.argv[0]).name} check       — Preview pending changes
   {Path(sys.argv[0]).name}             — Interactive mode
 
 Examples:
   {Path(sys.argv[0]).name} current
   {Path(sys.argv[0]).name} employees
+  {Path(sys.argv[0]).name} diff
   {Path(sys.argv[0]).name}
 """,
         file=sys.stderr,
@@ -47,7 +49,7 @@ def preflight(mode: str = "") -> None:
     if not SCHEDULES_FILE.exists():
         print(f"Error: file not found: {SCHEDULES_FILE}", file=sys.stderr)
         sys.exit(1)
-    if mode in ("employees", "emp") and not EMPLOYEES_FILE.exists():
+    if mode in ("employees", "emp", "diff") and not EMPLOYEES_FILE.exists():
         print(f"Error: file not found: {EMPLOYEES_FILE}", file=sys.stderr)
         sys.exit(1)
 
@@ -160,9 +162,10 @@ def interactive_prompt() -> argparse.Namespace:
     print("Select action:", file=sys.stderr)
     print("  1) Current   — list names from schedules.xlsm", file=sys.stderr)
     print("  2) Employees — list names + labels from employees.docx", file=sys.stderr)
-    print("  3) Check     — preview pending changes", file=sys.stderr)
-    print("  4) Sync      — update schedules", file=sys.stderr)
-    choice = input("Enter number [1-4]: ").strip()
+    print("  3) Diff      — compare schedules vs employees", file=sys.stderr)
+    print("  4) Check     — preview pending changes", file=sys.stderr)
+    print("  5) Sync      — update schedules", file=sys.stderr)
+    choice = input("Enter number [1-5]: ").strip()
 
     args = argparse.Namespace()
     match choice:
@@ -171,8 +174,10 @@ def interactive_prompt() -> argparse.Namespace:
         case "2":
             args.mode = "employees"
         case "3":
-            args.mode = "check"
+            args.mode = "diff"
         case "4":
+            args.mode = "check"
+        case "5":
             args.mode = "sync"
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
@@ -192,6 +197,30 @@ def cmd_employees() -> None:
     for emp in data:
         label_part = f"  [{emp['label']}]" if emp["label"] else ""
         print(f"{emp['fio']}{label_part}")
+
+
+def cmd_diff() -> None:
+    sched = get_all_employees()
+    emp = parse_employees(EMPLOYEES_FILE)
+
+    i = j = 0
+    while i < len(sched) and j < len(emp):
+        cmp = (sched[i]["fio"] > emp[j]["fio"]) - (sched[i]["fio"] < emp[j]["fio"])
+        if cmp == 0:
+            print(sched[i]["fio"])
+            i += 1
+            j += 1
+        elif cmp < 0:
+            print(f"{RED}{sched[i]['fio']}{NC}")
+            i += 1
+        else:
+            print(f"{GREEN}{emp[j]['fio']}{NC}")
+            j += 1
+
+    for e in sched[i:]:
+        print(f"{RED}{e['fio']}{NC}")
+    for e in emp[j:]:
+        print(f"{GREEN}{e['fio']}{NC}")
 
 
 def cmd_check() -> None:
@@ -227,13 +256,15 @@ def main() -> None:
         cmd_current()
     elif ns.mode in ("employees", "emp"):
         cmd_employees()
+    elif ns.mode in ("diff"):
+        cmd_diff()
     elif ns.mode in ("check", "c"):
         cmd_check()
     elif ns.mode in ("sync", "s"):
         cmd_sync()
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: current, employees, check, sync", file=sys.stderr)
+        print("  Valid modes: current, employees, diff, check, sync", file=sys.stderr)
         sys.exit(1)
 
 

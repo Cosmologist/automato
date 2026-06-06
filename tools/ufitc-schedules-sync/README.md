@@ -26,6 +26,7 @@
 |---------|-----------|
 | `current` | ФИО из schedules.xlsm, единый список, по алфавиту |
 | `employees` | ФИО + метка из employees.docx, по алфавиту |
+| `diff` | Full outer join: совпавшие (default), только в schedule (RED), только в employees (GREEN) |
 | `check` | Preview изменений (TODO) |
 | `sync` | Обновление расписания (TODO) |
 
