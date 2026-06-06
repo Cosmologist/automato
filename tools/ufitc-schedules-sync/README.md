@@ -27,6 +27,11 @@ Full outer join списков ФИО из schedules.xlsm и employees.docx:
 - только в schedule — RED
 - только в employees — GREEN
 
+## Режим `clean`
+
+Удаляет из schedules.xlsm строки сотрудников, у которых нет пары в employees.docx (RED из diff).
+Использует `SheetMapping` — удаление через буфер с сохранением стилей/мержей.
+
 ## Парсинг xlsm
 - Пустая строка — разделитель таблиц (первая встреченная)
 - Table 1: данные rows[2:sep_idx]

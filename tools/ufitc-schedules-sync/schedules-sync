@@ -36,13 +36,14 @@ Usage:
   {Path(sys.argv[0]).name} current     — List all employee names from schedules.xlsm
   {Path(sys.argv[0]).name} employees   — List all employee names + labels from employees.docx
   {Path(sys.argv[0]).name} diff        — Compare schedules vs employees (full outer join)
-  {Path(sys.argv[0]).name} check       — Preview pending changes
+  {Path(sys.argv[0]).name} clean       — Remove from schedules rows without pair in employees
   {Path(sys.argv[0]).name}             — Interactive mode
 
 Examples:
   {Path(sys.argv[0]).name} current
   {Path(sys.argv[0]).name} employees
   {Path(sys.argv[0]).name} diff
+  {Path(sys.argv[0]).name} clean
   {Path(sys.argv[0]).name}
 """,
         file=sys.stderr,
@@ -54,7 +55,7 @@ def preflight(mode: str = "") -> None:
     if not SCHEDULES_FILE.exists():
         print(f"Error: file not found: {SCHEDULES_FILE}", file=sys.stderr)
         sys.exit(1)
-    if mode in ("employees", "emp", "diff") and not EMPLOYEES_FILE.exists():
+    if mode in ("employees", "emp", "diff", "clean") and not EMPLOYEES_FILE.exists():
         print(f"Error: file not found: {EMPLOYEES_FILE}", file=sys.stderr)
         sys.exit(1)
 
@@ -266,9 +267,10 @@ def interactive_prompt() -> argparse.Namespace:
     print("  1) Current   — list names from schedules.xlsm", file=sys.stderr)
     print("  2) Employees — list names + labels from employees.docx", file=sys.stderr)
     print("  3) Diff      — compare schedules vs employees", file=sys.stderr)
-    print("  4) Check     — preview pending changes", file=sys.stderr)
-    print("  5) Sync      — update schedules", file=sys.stderr)
-    choice = input("Enter number [1-5]: ").strip()
+    print("  4) Clean     — remove rows without pair in employees", file=sys.stderr)
+    print("  5) Check     — preview pending changes", file=sys.stderr)
+    print("  6) Sync      — update schedules", file=sys.stderr)
+    choice = input("Enter number [1-6]: ").strip()
 
     args = argparse.Namespace()
     match choice:
@@ -279,8 +281,10 @@ def interactive_prompt() -> argparse.Namespace:
         case "3":
             args.mode = "diff"
         case "4":
-            args.mode = "check"
+            args.mode = "clean"
         case "5":
+            args.mode = "check"
+        case "6":
             args.mode = "sync"
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
@@ -361,6 +365,33 @@ def cmd_sync() -> None:
     print("Sync mode — updating schedules...", file=sys.stderr)
 
 
+def cmd_clean() -> None:
+    docx_employees = parse_employees(EMPLOYEES_FILE)
+    docx_fios = {e["fio"] for e in docx_employees}
+
+    sched_employees = get_all_employees()
+    to_remove = [e for e in sched_employees if e["fio"] not in docx_fios]
+    to_remove.sort(key=lambda e: e["row_num"], reverse=True)
+
+    if not to_remove:
+        print("Nothing to remove — all schedule rows have a pair in employees.", file=sys.stderr)
+        return
+
+    print(f"Removing {len(to_remove)} rows from {SCHEDULES_FILE}...", file=sys.stderr)
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+    ws = wb.active
+    sm = SheetMapping(ws)
+
+    for emp in to_remove:
+        print(f"{RED}-{NC} Row {emp['row_num']}: {emp['fio']}", file=sys.stderr)
+        sm.remove_row(emp["row_num"])
+
+    sm.render(ws)
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+    print(f"Done. {len(to_remove)} rows removed.", file=sys.stderr)
+
+
 # ── Main ─────────────────────────────────────────────────────
 def main() -> None:
     print_summary()
@@ -384,13 +415,15 @@ def main() -> None:
         cmd_employees()
     elif ns.mode in ("diff"):
         cmd_diff()
+    elif ns.mode in ("clean"):
+        cmd_clean()
     elif ns.mode in ("check", "c"):
         cmd_check()
     elif ns.mode in ("sync", "s"):
         cmd_sync()
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: current, employees, diff, check, sync", file=sys.stderr)
+        print("  Valid modes: current, employees, diff, clean, check, sync", file=sys.stderr)
         sys.exit(1)
 
 
