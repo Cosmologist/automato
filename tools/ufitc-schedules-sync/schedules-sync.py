@@ -112,7 +112,7 @@ def load_schedules_xlsm(path: Path) -> list[str]:
     for row in ws.iter_rows(min_row=3, max_col=2):
         cell = row[1]
         if cell.value is None or str(cell.value).strip() == "":
-            break
+            continue
         name = normalize_name(str(cell.value))
         if name:
             employees.append(name)
