@@ -24,16 +24,24 @@
 
 | Команда | Что делает |
 |---------|-----------|
-| `current` | Выводит все ФИО (stdout), две таблицы |
+| `current` | ФИО из schedules.xlsm, единый список, по алфавиту |
+| `employees` | ФИО + метка из employees.docx, по алфавиту |
 | `check` | Preview изменений (TODO) |
 | `sync` | Обновление расписания (TODO) |
 
-## Парсинг
+## Парсинг xlsm
 - Пустая строка — разделитель таблиц (первая встреченная)
 - Table 1: данные rows[2:sep_idx]
 - Table 2: данные rows[sep_idx+2:]
 - Возвращает: `tables[].employees[].{row_num, fio_raw, fio}`
 
-## Единый список
+## Единый список (xlsm)
 - `get_all_employees()` — объединяет обе таблицы, сортирует по `fio`
 - Каждый employee содержит `table_index` (0 или 1)
+
+## Парсинг docx
+- Одна таблица, первая строка — заголовок
+- Col 1 (index 1): ФИО (trailing `,` удаляется)
+- Col 2 (index 2): метка
+- Сортировка по `fio`
+- `parse_employees()` → `[{fio_raw, fio, label}]`
