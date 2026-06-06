@@ -41,6 +41,7 @@ Validate all arguments before execution. Fail early with a clear message.
 
 ### 4. Pre-flight Checks
 Before making changes, verify: required tools exist, prerequisites are met, change is actually needed, root/sudo rights. Ask the user if checks are ambiguous.
+Pre-flight checks MUST run **before** any interactive prompts — users should not waste time answering questions only to fail on sudo or missing tools.
 
 ### 5. In-process output
 - The output should look like a step-by-step instruction if the user were to ask for one.

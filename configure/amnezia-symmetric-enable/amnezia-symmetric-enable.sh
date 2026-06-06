@@ -233,7 +233,6 @@ interactive_prompt() {
 
 # ── Pre-flight checks ───────────────────────────────────────
 preflight() {
-  local mode="$1"
   echo "--- Pre-flight ---"
 
   if [ "$EUID" -ne 0 ]; then
@@ -266,14 +265,15 @@ preflight() {
     echo -e "  $(printf '%-28s' "systemctl:") ${GREEN}passed${NC}"
   fi
 
-  if [ "$mode" = "enable" ]; then
-    if [ ! -x "$NET_TOOL" ]; then
-      echo -e "  $(printf '%-28s' "net-tool.sh:") ${RED}failed${NC} — not found at $NET_TOOL"
-      return 1
-    fi
-    echo -e "  $(printf '%-28s' "net-tool.sh:") ${GREEN}passed${NC}"
-  fi
+  return 0
+}
 
+check_net_tool() {
+  if [ ! -x "$NET_TOOL" ]; then
+    echo -e "  $(printf '%-28s' "net-tool.sh:") ${RED}failed${NC} — not found at $NET_TOOL"
+    return 1
+  fi
+  echo -e "  $(printf '%-28s' "net-tool.sh:") ${GREEN}passed${NC}"
   return 0
 }
 
@@ -297,6 +297,11 @@ for arg in "$@"; do
   esac
 done
 
+# Pre-flight checks — run before any prompts
+if ! preflight; then
+  die "Pre-flight checks failed"
+fi
+
 # Interactive prompt if no mode given
 if [ "$MODE" != "enable" ] && [ "$MODE" != "disable" ]; then
   interactive_prompt
@@ -318,10 +323,6 @@ echo ""
 
 # ── Disable mode ────────────────────────────────────────────
 if [ "$MODE" = "disable" ]; then
-  if ! preflight "disable"; then
-    die "Pre-flight checks failed"
-  fi
-
   WAS_RUNNING=false
   amnezia_running && WAS_RUNNING=true
 
@@ -344,6 +345,10 @@ if [ "$MODE" = "disable" ]; then
 fi
 
 # ── Enable mode ─────────────────────────────────────────────
+if ! check_net_tool; then
+  die "Pre-flight checks failed"
+fi
+
 # Fetch network parameters from net-tool.sh
 echo "Fetching network parameters for $IFACE..."
 
@@ -358,10 +363,6 @@ echo "  Table:     $NET_TABLE"
 echo "  Subnet:    $NET_MASK"
 echo "  Gateway:   $NET_GATEWAY"
 echo ""
-
-if ! preflight "enable"; then
-  die "Pre-flight checks failed"
-fi
 
 WAS_RUNNING=false
 amnezia_running && WAS_RUNNING=true
