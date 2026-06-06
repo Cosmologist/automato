@@ -10,6 +10,7 @@ Usage:
   ./schedules-sync.py employees   — show employee list from employees.docx
   ./schedules-sync.py schedule    — show employee list from schedules.xlsm
   ./schedules-sync.py diff        — show diff between schedule and employee list
+  ./schedules-sync.py clean       — remove employees from schedules.xlsm not in employees.docx
   ./schedules-sync.py             — interactive mode selection
 """
 
@@ -54,11 +55,13 @@ def print_summary():
     print("  employees   — show employee list from employees.docx")
     print("  schedule    — show employee list from schedules.xlsm")
     print("  diff        — show diff between schedule and employee list")
+    print("  clean       — remove employees from schedules.xlsm not in employees.docx")
     print()
     print("Usage examples:")
     print(f"  ./{Path(__file__).name} employees")
     print(f"  ./{Path(__file__).name} schedule")
     print(f"  ./{Path(__file__).name} diff")
+    print(f"  ./{Path(__file__).name} clean")
     print(f"  ./{Path(__file__).name}              # interactive mode")
     print("=" * 60)
     print()
@@ -207,11 +210,80 @@ def cmd_diff():
     print()
 
 
+def load_schedules_xlsm_with_rows(path: Path) -> list[tuple[int, str]]:
+    wb = openpyxl.load_workbook(str(path), read_only=True, keep_vba=True)
+    ws = wb[SHEET_NAME]
+    employees = []
+    for row in ws.iter_rows(min_row=3, max_col=2):
+        cell = row[1]
+        if cell.value is None or str(cell.value).strip() == "":
+            continue
+        name = normalize_name(str(cell.value))
+        if name:
+            employees.append((cell.row, name))
+    wb.close()
+    return employees
+
+
+def cmd_clean():
+    if not SCHEDULES_FILE.exists():
+        sys.exit(f"Error: {SCHEDULES_FILE} not found")
+    if not EMPLOYEES_FILE.exists():
+        sys.exit(f"Error: {EMPLOYEES_FILE} not found")
+
+    print(f"Loading schedule from {CYAN}{SCHEDULES_FILE.name}{NC}...")
+    schedules_with_rows = load_schedules_xlsm_with_rows(SCHEDULES_FILE)
+    print(f"  Found {BOLD}{len(schedules_with_rows)}{NC} employees")
+
+    print(f"Loading employees from {CYAN}{EMPLOYEES_FILE.name}{NC}...")
+    employees = load_employees_docx(EMPLOYEES_FILE)
+    print(f"  Found {BOLD}{len(employees)}{NC} employees")
+
+    employees_names = [name for name, _ in employees]
+    employees_set = set(employees_names)
+
+    to_remove = []
+    for row_num, name in schedules_with_rows:
+        if name not in employees_set:
+            to_remove.append((row_num, name))
+
+    if not to_remove:
+        print()
+        print("Schedule is already clean. No employees to remove.")
+        return
+
+    print()
+    print(f"{RED}Employees to remove from schedule ({len(to_remove)}):{NC}")
+    for row_num, name in to_remove:
+        print(f"  {RED}-{NC} {SCHEDULES_FILE.name}:B{row_num} → {name}")
+
+    print()
+    confirm = input(f"Remove {len(to_remove)} employees? [y/N]: ").strip().lower()
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    wb = openpyxl.load_workbook(str(SCHEDULES_FILE), keep_vba=True)
+    ws = wb[SHEET_NAME]
+
+    rows_to_delete = [row_num for row_num, _ in to_remove]
+    rows_to_delete.sort(reverse=True)
+
+    for row_num in rows_to_delete:
+        ws.delete_rows(row_num, 1)
+
+    wb.save(str(SCHEDULES_FILE))
+    print()
+    print(f"Removed {len(to_remove)} employees from {SCHEDULES_FILE.name}")
+    print("Done.")
+
+
 def interactive_mode() -> str:
     modes = [
         ("employees", "Show employee list from employees.docx"),
         ("schedule", "Show employee list from schedules.xlsm"),
         ("diff", "Show diff between schedule and employee list"),
+        ("clean", "Remove employees from schedules.xlsm not in employees.docx"),
     ]
     print("Available modes:")
     for i, (name, desc) in enumerate(modes, 1):
@@ -228,7 +300,9 @@ def interactive_mode() -> str:
             return "schedule"
         if choice == "3":
             return "diff"
-        print("Invalid choice. Enter 1, 2 or 3.")
+        if choice == "4":
+            return "clean"
+        print("Invalid choice. Enter 1, 2, 3 or 4.")
 
 
 def main():
@@ -248,6 +322,8 @@ def main():
         cmd_schedule()
     elif mode == "diff":
         cmd_diff()
+    elif mode == "clean":
+        cmd_clean()
     else:
         sys.exit(f"Unknown mode: {mode}")
 
