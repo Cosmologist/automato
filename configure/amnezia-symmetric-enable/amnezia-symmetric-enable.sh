@@ -214,7 +214,7 @@ interactive_prompt() {
       ;;
   esac
 
-  mapfile -t ifaces < <(ip -br link show | awk '{print $1}')
+  mapfile -t ifaces < <("$NET_TOOL" ifaces 2>/dev/null)
 
   echo "Available interfaces:" >&2
   for i in "${!ifaces[@]}"; do

@@ -19,6 +19,7 @@ Displays network information about the current machine.
 
 Usage:
   $SCRIPT_NAME [--allow-no-result] [--all] active   — Print primary interface (or all with --all)
+  $SCRIPT_NAME [--allow-no-result] [--all] ifaces   — List interfaces (physical only, or all with --all)
   $SCRIPT_NAME [--allow-no-result] mark                        — Print a free iptables fwmark value (hex)
   $SCRIPT_NAME [--allow-no-result] table                       — Print a free routing table number
   $SCRIPT_NAME [--allow-no-result] mask      [<interface>]     — Print subnet (CIDR) for an interface
@@ -30,6 +31,8 @@ With    --allow-no-result: prints empty string and exits with code 0.
 
 Examples:
   IFACE=\$($SCRIPT_NAME active)
+  $SCRIPT_NAME ifaces                     # => eno1, enp0s31f6, ...
+  $SCRIPT_NAME ifaces --all               # => lo, eno1, wg0, ...
   $SCRIPT_NAME mark                       # => 0x100
   $SCRIPT_NAME table                      # => 1
   $SCRIPT_NAME mask                       # uses active interface
@@ -124,6 +127,17 @@ cmd_active() {
   fi
   echo "Found: $first" >&2
   echo "$first"
+}
+
+# ── Mode: ifaces ─────────────────────────────────────────────
+cmd_ifaces() {
+  if $ALL_MODE; then
+    echo "Listing all interfaces (physical + virtual)..." >&2
+    all_iface_list
+  else
+    echo "Listing physical interfaces..." >&2
+    physical_iface_list
+  fi
 }
 
 # ── Mode: mark ───────────────────────────────────────────────
@@ -389,6 +403,9 @@ case "$MODE" in
   active | a)
     cmd_active
     ;;
+  ifaces | i)
+    cmd_ifaces
+    ;;
   mark | m)
     cmd_mark
     ;;
@@ -406,7 +423,7 @@ case "$MODE" in
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "  Valid modes: active, mark, table, mask, gateway, env" >&2
+    echo "  Valid modes: active, ifaces, mark, table, mask, gateway, env" >&2
     exit 1
     ;;
 esac
