@@ -105,7 +105,6 @@ def normalize_fio(name: str) -> str:
     s = s.replace("ё", "е").replace("Ё", "Е")
     s = re.sub(r"\d+/\d+", "", s)
     s = re.sub(r"\s+", " ", s)
-    s = " ".join(w[0].upper() + w[1:].lower() if w else w for w in s.split())
     return s.strip()
 
 def is_fio_cell(val: Any) -> bool:
@@ -115,7 +114,7 @@ def is_fio_cell(val: Any) -> bool:
     parts = s.split()
     if len(parts) != 3:
         return False
-    return all(re.match(r"^[А-ЯЁ][а-яё]+$", p) for p in parts)
+    return all(re.match(r"^[а-яё]+$", p.lower()) for p in parts)
 
 def fio_key(name: str) -> str:
     return normalize_fio(name).lower()
@@ -416,7 +415,7 @@ def scan_depart_file(filepath: Path, data_count: int) -> list[dict]:
         if cell_val is None:
             break
         cleaned = normalize_fio(str(cell_val))
-        if not cleaned or not is_fio_cell(cell_val):
+        if not cleaned or not is_fio_cell(cleaned):
             if cleaned:
                 continue
             break
