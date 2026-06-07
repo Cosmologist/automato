@@ -605,6 +605,12 @@ def step_merge() -> None:
                 cell.value = None
                 clear_count += 1
     print(f"{GREEN}→{NC} Cleared {clear_count} schedule values", file=sys.stderr)
+    empty_name = "Empty"
+    if empty_name in wb.sheetnames:
+        del wb[empty_name]
+    ws_empty = wb.create_sheet(empty_name)
+    sm.render(ws_empty)
+    wb.save(SCHEDULES_FILE)
     depart_files = sorted(DEPARTS_DIR.glob("*.xlsx"))
     depart_files = [f for f in depart_files if not f.name.startswith(".~lock.")]
     if not depart_files:
