@@ -780,27 +780,23 @@ def step_pretty() -> None:
     b8_total = 0
     white_total = 0
     otp_total = 0
-    v_total = 0
     for r in range(t1_start, sep_idx + 1):
         for c in range(3, 3 + data_count):
             cell = sm.get_cell(r, c)
             if cell is not None and isinstance(cell.value, str) and cell.value.strip() == "ОТ":
                 cell.value = "ОТП"
-            if cell is None or cell.value is None:
-                sm.set_cell(r, c, value="В")
-                cell = sm.get_cell(r, c)
-                v_total += 1
-            v = cell.value if cell else None
-            if isinstance(v, str) and v.strip() == "В":
+            if cell is not None and isinstance(cell.value, str) and cell.value.strip() == "В":
+                cell.value = ""
+            if cell is None or cell.value is None or (isinstance(cell.value, str) and cell.value.strip() == ""):
                 sm.set_cell(r, c, fill=B8CCE4_FILL)
                 b8_total += 1
-            elif isinstance(v, (int, float)):
+            elif isinstance(cell.value, (int, float)):
                 sm.set_cell(r, c, fill=WHITE_FILL)
                 white_total += 1
-            elif isinstance(v, str) and v.strip() == "ОТП":
+            elif isinstance(cell.value, str) and cell.value.strip() == "ОТП":
                 sm.set_cell(r, c, fill=OTP_FILL)
                 otp_total += 1
-    print(f"{GREEN}→{NC} Pretty: В={v_total} B8CCE4={b8_total} white={white_total} OTP={otp_total}", file=sys.stderr)
+    print(f"{GREEN}→{NC} Pretty: B8CCE4={b8_total} white={white_total} OTP={otp_total}", file=sys.stderr)
     sheet_name = "Pretty"
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
