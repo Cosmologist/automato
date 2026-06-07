@@ -44,7 +44,6 @@ Usage:
   {Path(sys.argv[0]).name} update         — Update schedules from updates/ files
   {Path(sys.argv[0]).name} pretty         — Style cells in schedule data
   {Path(sys.argv[0]).name} final          — Renumber and finalize
-  {Path(sys.argv[0]).name} complete       — Show completion message
   {Path(sys.argv[0]).name}                — Interactive mode
 
 Examples:
@@ -475,7 +474,6 @@ def interactive_prompt() -> argparse.Namespace:
     print("  4) Update — update schedules from updates/ files", file=sys.stderr)
     print("  5) Pretty — style cells in schedule data", file=sys.stderr)
     print("  6) Final  — renumber and finalize", file=sys.stderr)
-    print("  7) Complete — show completion message", file=sys.stderr)
     choice = input("Enter number [1-7]: ").strip()
     args = argparse.Namespace()
     match choice:
@@ -491,8 +489,6 @@ def interactive_prompt() -> argparse.Namespace:
             args.mode = "pretty"
         case "6":
             args.mode = "final"
-        case "7":
-            args.mode = "complete"
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
             sys.exit(1)
@@ -956,9 +952,7 @@ def step_pretty() -> None:
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Pretty data written to sheet '{sheet_name}', renamed to 'Лист'.", file=sys.stderr)
-    ans = input("\nContinue with complete? (y/N): ").strip().lower()
-    if ans == "y":
-        step_complete()
+    step_complete()
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 6: Final (renumber)
@@ -977,9 +971,7 @@ def step_final() -> None:
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Column A renumbered on first sheet.", file=sys.stderr)
-    ans = input("\nContinue with complete? (y/N): ").strip().lower()
-    if ans == "y":
-        step_complete()
+    step_complete()
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 7: Complete
@@ -1017,11 +1009,9 @@ def main() -> None:
         step_pretty()
     elif ns.mode in ("final"):
         step_final()
-    elif ns.mode in ("complete"):
-        step_complete()
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: diff, clean, merge, update, pretty, final, complete", file=sys.stderr)
+        print("  Valid modes: diff, clean, merge, update, pretty, final", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
