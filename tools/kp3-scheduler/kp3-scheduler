@@ -592,13 +592,13 @@ def step_merge() -> None:
     for r in range(t1_start, t1_end + 1):
         for c in range(3, 3 + data_count):
             cell = sm.get_cell(r, c)
-            if cell is not None and cell.value is not None:
+            if cell is not None and cell.value is not None and cell.value != "ПДН":
                 cell.value = None
                 clear_count += 1
     for r in range(t2_start, sm.max_row + 1):
         for c in range(3, 3 + data_count):
             cell = sm.get_cell(r, c)
-            if cell is not None and cell.value is not None:
+            if cell is not None and cell.value is not None and cell.value != "ПДН":
                 cell.value = None
                 clear_count += 1
     print(f"{GREEN}→{NC} Cleared {clear_count} schedule values", file=sys.stderr)
@@ -628,9 +628,18 @@ def step_merge() -> None:
         if not fio:
             continue
         t1_fio_map[fio_key(fio)] = {"row_num": r, "fio": fio}
+    t2_fio_map: dict[str, dict] = {}
+    for r in range(t2_start, sm.max_row + 1):
+        cell = sm.get_cell(r, 2)
+        if cell is None or cell.value is None:
+            continue
+        fio = normalize_fio(str(cell.value))
+        if not fio:
+            continue
+        t2_fio_map[fio_key(fio)] = {"row_num": r, "fio": fio}
     existing_keys = {fk for fk in depart_employees if fk in t1_fio_map}
     new_keys = sorted(
-        [fk for fk in depart_employees if fk not in t1_fio_map],
+        [fk for fk in depart_employees if fk not in t1_fio_map and fk not in t2_fio_map],
         key=lambda fk: fk,
     )
     inserted_count = 0
@@ -649,8 +658,6 @@ def step_merge() -> None:
         else:
             after_row = sorted_existing[pos - 1]["row_num"]
         new_row = sm.insert(after_row)
-        style_src = sorted_existing[0]["row_num"] if sorted_existing else t1_start
-        sm.clone_row_style(style_src, new_row)
         sm.set_cell(new_row, 1, value=0)
         sm.set_cell(new_row, 2, value=emp["fio"], fill=GREEN_FILL)
         for di in range(data_count):
@@ -660,13 +667,13 @@ def step_merge() -> None:
         t1_fio_map[fk] = {"row_num": new_row, "fio": emp["fio"]}
         t1_end += 1
         print(f"{GREEN}+{NC} {emp['fio']} — new (green) at row {new_row}")
-    for (r, c), data in list(sm.cells.items()):
+    t1_fio_map = {}
+    for (r, c), data in sm.cells.items():
         if c == 2 and data.value is not None and t1_start <= r <= t1_end:
             fio = normalize_fio(str(data.value))
             if fio:
-                fk = fio_key(fio)
-                if fk not in t1_fio_map:
-                    t1_fio_map[fk] = {"row_num": r, "fio": fio}
+                t1_fio_map[fio_key(fio)] = {"row_num": r, "fio": fio}
+    existing_keys = {fk for fk in depart_employees if fk in t1_fio_map}
     updated_count = 0
     for fk in existing_keys:
         emp = depart_employees[fk]
