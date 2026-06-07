@@ -363,7 +363,7 @@ def spiral_find_fio(ws) -> tuple[int, int] | None:
     for N in range(1, limit + 1):
         if N <= max_col:
             for r in range(1, N + 1):
-                if r <= max_row:
+                if r <= max_row and not ws.row_dimensions[r].hidden:
                     val = ws.cell(row=r, column=N).value
                     if is_fio_cell(val):
                         return (N, r)
@@ -407,6 +407,8 @@ def scan_depart_file(filepath: Path, data_count: int) -> list[dict]:
     data_end = min(fio_col + data_count, max_col)
     employees = []
     for r in range(start_row, max_row + 1):
+        if ws.row_dimensions[r].hidden:
+            continue
         cell_val = ws.cell(row=r, column=fio_col).value
         if cell_val is None:
             break
