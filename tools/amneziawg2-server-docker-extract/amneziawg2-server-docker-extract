@@ -1,0 +1,567 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly SELF="amneziawg2-server-docker-extract"
+readonly REMOTE_HOST="132.243.224.223"
+readonly REMOTE_USER="root"
+readonly CONTAINER="amnezia-awg2"
+readonly AWG_PORT="48452"
+readonly REMOTE_AWG_DIR="/etc/amnezia"
+readonly REMOTE_CONF="$REMOTE_AWG_DIR/awg0.conf"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; NC='\033[0m'; BOLD='\033[1m'
+
+s() { ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$REMOTE_USER@$REMOTE_HOST" "$@"; }
+ok() { echo -e "${GREEN}✓${NC} $1"; }
+info() { echo -e "  ${BLUE}→${NC} $1"; }
+warn() { echo -e "${YELLOW}⚠${NC} $1"; }
+fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
+add()  { echo -e "${GREEN}+${NC} $1"; }
+del()  { echo -e "${RED}-${NC} $1"; }
+skip() { echo -e "${YELLOW}skip${NC} $1"; }
+chg()  { echo -e "${GREEN}→${NC} $1"; }
+sep()  { echo -e "${BLUE}──────────────────────────────────────────────${NC}"; }
+
+print_summary() {
+  cat <<EOF
+
+${BOLD}${SELF}${NC} — Migrate AmneziaWG from Docker to native on Debian
+Extracts the ${BOLD}amnezia-awg2${NC} Docker container's WireGuard tunnel
+and runs it natively on the host via amneziawg-tools.
+
+Phases:
+  --preflight       Read-only checks (server reachable, container, deps)
+  --setup-awg       Install amneziawg from PPA, copy config, start native tunnel
+  --enable-service  Enable systemd service for native tunnel
+  --setup-iptables  Apply iptables NAT/forward rules from start.sh
+  --test            Verify connectivity, prompt for manual check
+  --cleanup         Stop & remove Docker container (after user approval)
+  --restore         Restart Docker container, stop native (revert to original)
+  (no args)         Interactive menu
+
+Examples:
+  $SELF --preflight
+  $SELF --setup-awg
+  $SELF --test
+
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+container_running() { s "docker ps --format '{{.Names}}' 2>/dev/null | grep -q ^${CONTAINER}$"; }
+container_exists() { s "docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q ^${CONTAINER}$"; }
+native_up() { s "awg show awg0 &>/dev/null"; }
+
+stop_docker_for_port() {
+  if container_running; then
+    info "Stopping Docker container to free port $AWG_PORT..."
+    s "docker stop $CONTAINER" || warn "Failed to stop container"
+    ok "Container stopped (will restart on reboot or via --restore)"
+  fi
+}
+
+start_docker() {
+  if container_exists && ! container_running; then
+    info "Starting Docker container..."
+    s "docker start $CONTAINER" || warn "Failed to start container"
+    ok "Container started"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Pre-flight
+# ---------------------------------------------------------------------------
+do_preflight() {
+  sep
+  echo -e "${BOLD}Phase: Preflight${NC} — read-only checks"
+  sep
+
+  s true &>/dev/null || fail "Cannot SSH to $REMOTE_HOST"
+  ok "SSH to $REMOTE_HOST — reachable"
+
+  if container_running; then
+    ok "Container $CONTAINER — running"
+  elif container_exists; then
+    warn "Container $CONTAINER — exists but stopped"
+  else
+    fail "Container $CONTAINER not found"
+  fi
+
+  if s "test -f $REMOTE_CONF" &>/dev/null; then
+    ok "$REMOTE_CONF — already on host"
+  elif container_exists && s "docker cp $CONTAINER:/opt/amnezia/awg/awg0.conf /dev/null 2>/dev/null" &>/dev/null; then
+    ok "/opt/amnezia/awg/awg0.conf — exists in container (can be copied)"
+  else
+    fail "awg0.conf not found anywhere"
+  fi
+
+  local krnl; krnl=$(s "uname -r")
+  ok "Kernel: $krnl"
+  s "dpkg -l linux-headers-${krnl} 2>/dev/null | grep -q ^ii" && ok "linux-headers — installed" || warn "linux-headers not installed"
+  s "apt-cache show linux-headers-${krnl} &>/dev/null" && ok "linux-headers — available in apt" || warn "linux-headers NOT available in apt"
+
+  if s "dpkg -l amneziawg 2>/dev/null | grep -q ^ii"; then
+    ok "amneziawg package — installed"
+  else
+    warn "amneziawg not installed yet"
+  fi
+
+  local fwd; fwd=$(s "sysctl -n net.ipv4.ip_forward")
+  [ "$fwd" = "1" ] && ok "net.ipv4.ip_forward = 1" || warn "ip_forward = $fwd"
+
+  if native_up; then
+    ok "awg0 interface — UP (native)"
+  else
+    warn "awg0 interface — not up natively yet"
+  fi
+
+  local wg_port
+  wg_port=$(s "awg show awg0 2>/dev/null | grep 'listening port' | awk '{print \$NF}'" || echo "not listening")
+  info "awg0 port: $wg_port"
+
+  local peer_count awg_ver os_info hostname
+  if native_up; then
+    peer_count=$(s "awg show awg0 | grep -c '^peer:'" 2>/dev/null || echo "?")
+    awg_ver=$(s "awg --version" 2>/dev/null || echo "?")
+  elif container_exists; then
+    peer_count=$(s "docker exec $CONTAINER wg show | grep -c '^peer:'" 2>/dev/null || echo "?")
+    awg_ver=$(s "docker exec $CONTAINER awg --version" 2>/dev/null || echo "?")
+  else
+    peer_count="?"; awg_ver="?"
+  fi
+  os_info=$(s "cat /etc/os-release 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\"'" || echo "?")
+  hostname=$(s "hostname" 2>/dev/null || echo "?")
+
+  sep
+  echo -e "${BOLD}Summary:${NC}"
+  info "Host: $hostname ($REMOTE_HOST)"
+  info "OS:   $os_info"
+  info "Kernel: $krnl"
+  info "AmneziaWG: $awg_ver"
+  info "Port: $AWG_PORT/udp"
+  info "Peers: $peer_count"
+  sep
+  ok "Preflight complete"
+}
+
+# ---------------------------------------------------------------------------
+# Setup AmneziaWG
+# ---------------------------------------------------------------------------
+do_setup_awg() {
+  sep
+  echo -e "${BOLD}Phase: Setup AmneziaWG${NC} — install PPA + native tunnel"
+  sep
+
+  local krnl; krnl=$(s "uname -r")
+  if ! s "dpkg -l linux-headers-${krnl} 2>/dev/null | grep -q ^ii"; then
+    info "Installing linux-headers-${krnl}..."
+    s "apt-get install -y linux-headers-${krnl}" || fail "Failed to install linux-headers"
+    ok "linux-headers-${krnl} — installed"
+  else
+    skip "linux-headers already installed"
+  fi
+
+  if ! s "dpkg -l amneziawg 2>/dev/null | grep -q ^ii"; then
+    info "Setting up Amnezia PPA repository..."
+    s "rm -f /etc/apt/sources.list.d/amnezia.sources 2>/dev/null || true"
+    s "apt-get install -y gnupg2 2>/dev/null"
+    s "gpg --keyserver keyserver.ubuntu.com --recv-keys 75C9DD72C799870E310542E24166F2C257290828 2>/dev/null" || true
+    s "gpg --export 75C9DD72C799870E310542E24166F2C257290828 | tee /usr/share/keyrings/amnezia.gpg > /dev/null" || true
+    s "echo 'deb [signed-by=/usr/share/keyrings/amnezia.gpg] https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main' > /etc/apt/sources.list.d/amnezia.list"
+    add "/etc/apt/sources.list.d/amnezia.list — Amnezia PPA added"
+    s "apt-get update" || fail "apt update failed"
+    s "apt-get install -y amneziawg" || fail "Failed to install amneziawg"
+    ok "amneziawg — installed"
+  else
+    skip "amneziawg already installed"
+  fi
+
+  s "which awg awg-quick &>/dev/null" || fail "awg/awg-quick not found"
+  ok "awg/awg-quick — available"
+
+  s "mkdir -p $REMOTE_AWG_DIR"
+
+  if [ ! -f "$REMOTE_CONF" ] 2>/dev/null && container_exists; then
+    info "Copying awg0.conf from container..."
+    s "docker cp $CONTAINER:/opt/amnezia/awg/awg0.conf $REMOTE_CONF"
+    add "$REMOTE_CONF ← docker:$CONTAINER:/opt/amnezia/awg/awg0.conf"
+  elif [ -f "$REMOTE_CONF" ] 2>/dev/null; then
+    skip "$REMOTE_CONF already exists on host"
+  else
+    fail "No awg0.conf available (container missing?)"
+  fi
+
+  local current_port
+  current_port=$(s "grep -i ListenPort $REMOTE_CONF | awk '{print \$3}'")
+  if [ "$current_port" != "$AWG_PORT" ]; then
+    s "sed -i 's/ListenPort = [0-9]*/ListenPort = $AWG_PORT/' $REMOTE_CONF"
+    chg "ListenPort: $current_port → $AWG_PORT"
+  else
+    skip "ListenPort already $AWG_PORT"
+  fi
+
+  s "cp $REMOTE_CONF ${REMOTE_CONF}.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+  add "${REMOTE_CONF}.bak — backup saved"
+
+  if native_up; then
+    skip "awg0 interface already exists natively"
+  else
+    stop_docker_for_port
+    info "Starting native awg0 interface..."
+    s "awg-quick up $REMOTE_CONF" || {
+      warn "awg-quick up failed, restoring Docker container..."
+      start_docker
+      fail "awg-quick up failed"
+    }
+    ok "awg-quick up — success"
+  fi
+
+  native_up || fail "awg0 interface not found after setup"
+  local if_addr; if_addr=$(s "ip -4 addr show awg0 2>/dev/null | grep inet | awk '{print \$2}'" || echo "?")
+  ok "awg0 interface — UP ($if_addr)"
+
+  sep
+  ok "Setup AmneziaWG complete"
+}
+
+# ---------------------------------------------------------------------------
+# Enable systemd service
+# ---------------------------------------------------------------------------
+do_enable_service() {
+  sep
+  echo -e "${BOLD}Phase: Enable systemd service${NC}"
+  sep
+
+  s "tee /etc/systemd/system/awg-quick@amnezia.service <<'SVC'
+[Unit]
+Description=AmneziaWG tunnel (native — migrated from Docker)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/awg-quick up $REMOTE_CONF
+ExecStop=/usr/bin/awg-quick down $REMOTE_CONF
+ExecReload=/usr/bin/awg-quick down $REMOTE_CONF && /usr/bin/awg-quick up $REMOTE_CONF
+[Install]
+WantedBy=multi-user.target
+SVC"
+  add "/etc/systemd/system/awg-quick@amnezia.service — created"
+  s "systemctl daemon-reload"
+  s "systemctl enable awg-quick@amnezia.service" || true
+  ok "systemd service enabled (awg-quick@amnezia)"
+  sep
+  ok "Service setup complete"
+}
+
+# ---------------------------------------------------------------------------
+# Setup iptables
+# ---------------------------------------------------------------------------
+do_setup_iptables() {
+  sep
+  echo -e "${BOLD}Phase: Setup iptables${NC} — NAT/forward rules"
+  sep
+
+  info "Applying iptables rules from original start.sh..."
+  local rules=(
+    "INPUT -i awg0 -j ACCEPT"
+    "FORWARD -i awg0 -j ACCEPT"
+    "OUTPUT -o awg0 -j ACCEPT"
+    "FORWARD -i awg0 -o eth0 -s 10.8.1.0/24 -j ACCEPT"
+    "FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT"
+    "nat:POSTROUTING -s 10.8.1.0/24 -o eth0 -j MASQUERADE"
+  )
+
+  for entry in "${rules[@]}"; do
+    local table="filter"
+    local rule="$entry"
+    if [[ "$entry" == nat:* ]]; then
+      table="nat"
+      rule="${entry#nat:}"
+    fi
+    if s "iptables -t $table -C $rule" &>/dev/null; then
+      skip "iptables -t $table -A $rule (already exists)"
+    else
+      s "iptables -t $table -A $rule"
+      add "iptables -t $table -A $rule"
+    fi
+  done
+
+  if ! s "dpkg -l iptables-persistent 2>/dev/null | grep -q ^ii"; then
+    info "Installing iptables-persistent..."
+    s "DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent" || {
+      s "echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections"
+      s "echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections"
+      s "DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent"
+    }
+    ok "iptables-persistent — installed"
+  else
+    skip "iptables-persistent already installed"
+  fi
+
+  s "iptables-save > /etc/iptables/rules.v4" 2>/dev/null || s "netfilter-persistent save" || true
+  ok "iptables rules saved persistently"
+
+  sep
+  ok "iptables setup complete"
+}
+
+# ---------------------------------------------------------------------------
+# Test
+# ---------------------------------------------------------------------------
+do_test() {
+  sep
+  echo -e "${BOLD}Phase: Test${NC} — verify tunnel and connectivity"
+  sep
+
+  if native_up; then
+    ok "awg0 — UP (native)"
+    s "awg show awg0 | head -20"
+  elif container_running; then
+    warn "Native awg0 not up, using Docker container"
+    s "docker exec $CONTAINER wg show | head -20"
+  else
+    fail "No active awg0 interface found (neither native nor Docker)"
+  fi
+
+  sep
+  info "Checking peer handshakes..."
+  local handshakes
+  if native_up; then
+    handshakes=$(s "awg show awg0 2>/dev/null | grep -c 'latest handshake'" || echo "0")
+  else
+    handshakes=$(s "docker exec $CONTAINER wg show 2>/dev/null | grep -c 'latest handshake'" || echo "0")
+  fi
+  [ "$handshakes" -gt 0 ] && ok "$handshakes peers with handshake data" || warn "No handshake data yet"
+
+  sep
+  info "Checking AmneziaWG listens on port $AWG_PORT..."
+  local wg_port
+  wg_port=$(s "awg show awg0 2>/dev/null | grep 'listening port' | awk '{print \$NF}'" || echo "")
+  if [ "$wg_port" = "$AWG_PORT" ]; then
+    ok "awg0 listening on port $AWG_PORT/udp (kernel mode)"
+  else
+    warn "awg0 listening on unknown port ($wg_port)"
+  fi
+
+  sep
+  info "Generating test client config..."
+  local tmp_dir="/tmp/awg-test-$$"
+  mkdir -p "$tmp_dir"
+  local test_key_priv test_key_pub
+  test_key_priv=$(s "awg genkey" 2>/dev/null || echo "fallback")
+  if [ "$test_key_priv" = "fallback" ]; then
+    warn "Cannot generate key on remote — skipping test peer"
+  else
+    test_key_pub=$(s "echo '$test_key_priv' | awg pubkey")
+  fi
+
+  local server_pub_key
+  if native_up; then
+    server_pub_key=$(s "awg show awg0 2>/dev/null | grep 'public key' | awk '{print \$NF}'")
+  elif container_running; then
+    server_pub_key=$(s "docker exec $CONTAINER wg show 2>/dev/null | grep 'public key' | awk '{print \$3}'")
+  else
+    server_pub_key=""
+  fi
+
+  if [ -z "$server_pub_key" ]; then
+    warn "Could not determine server public key"
+  else
+    cat > "$tmp_dir/test-client.conf" <<EOF
+[Interface]
+PrivateKey = $test_key_priv
+Address = 10.8.1.250/32
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = $server_pub_key
+Endpoint = $REMOTE_HOST:$AWG_PORT
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+EOF
+    add "$tmp_dir/test-client.conf — test client config (10.8.1.250/32)"
+
+    # Add test peer to server
+    if native_up; then
+      s "awg set awg0 peer $test_key_pub allowed-ips 10.8.1.250/32" 2>/dev/null && \
+        info "Test peer added to native awg0" || \
+        warn "Could not add test peer (non-critical)"
+    elif container_running; then
+      s "docker exec $CONTAINER wg set awg0 peer $test_key_pub allowed-ips 10.8.1.250/32" 2>/dev/null && \
+        info "Test peer added to Docker awg0" || \
+        warn "Could not add test peer (non-critical)"
+    fi
+  fi
+
+  echo "$tmp_dir" > /tmp/awg-test-dir 2>/dev/null || true
+
+  sep
+  local docker_status peer_count
+  docker_status=$(s "docker ps -a --format '{{.Status}}' --filter name=${CONTAINER}" 2>/dev/null || echo "not found")
+  peer_count=$(s "awg show awg0 2>/dev/null | grep -c '^peer:'" || \
+               s "docker exec $CONTAINER wg show 2>/dev/null | grep -c '^peer:'" || echo "?")
+  if native_up; then
+    local native_port
+    native_port=$(s "awg show awg0 2>/dev/null | grep 'listening port' | awk '{print \$NF}'" || echo "?")
+    info "Native awg0 port: $native_port"
+  fi
+
+  echo -e "${BOLD}Test Summary:${NC}"
+  info "Docker container: $docker_status"
+  info "awg0 peers: $peer_count"
+  [ -n "$server_pub_key" ] && info "Server public key: $server_pub_key"
+  info "Server endpoint: $REMOTE_HOST:$AWG_PORT"
+
+  sep
+  echo -e "${YELLOW}┌─────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "${YELLOW}│${NC}  ${BOLD}Manual verification required${NC}                                  ${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}  Check that your AmneziaVPN clients can still connect.   ${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}                                                         ${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}  Current state: native awg0 is UP, Docker container     ${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}  is STOPPED (safe — reboot restores Docker automatically)${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}                                                         ${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}  If clients DO work:  ${BOLD}--cleanup${NC} to remove Docker               ${YELLOW}│${NC}"
+  echo -e "${YELLOW}│${NC}  If clients DON'T work: ${BOLD}--restore${NC} to go back                    ${YELLOW}│${NC}"
+  echo -e "${YELLOW}└─────────────────────────────────────────────────────────────┘${NC}"
+  sep
+}
+
+# ---------------------------------------------------------------------------
+# Restore (revert to Docker)
+# ---------------------------------------------------------------------------
+do_restore() {
+  sep
+  echo -e "${BOLD}Phase: Restore${NC} — stop native, restart Docker"
+  sep
+
+  read -r -p "Type 'yes' to restore Docker setup: " answer
+  [ "$answer" != "yes" ] && { info "Restore skipped"; return; }
+
+  if native_up; then
+    info "Stopping native awg0..."
+    s "awg-quick down $REMOTE_CONF" && del "Native awg0 — stopped"
+  else
+    skip "No native awg0 to stop"
+  fi
+
+  start_docker
+  ok "Docker container is running"
+
+  if container_running; then
+    s "docker exec $CONTAINER awg-quick up /opt/amnezia/awg/awg0.conf 2>/dev/null" || true
+    ok "Docker container should have its tunnel up"
+  fi
+
+  sep
+  ok "Restore complete — clients should reconnect to Docker"
+}
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+do_cleanup() {
+  sep
+  echo -e "${BOLD}Phase: Cleanup${NC} — manage Docker container"
+  sep
+
+  if ! container_exists; then
+    skip "Container $CONTAINER not found — nothing to do"
+    return
+  fi
+
+  echo "Select mode for Docker container $CONTAINER:"
+  echo "  1) Full cleanup — stop and permanently remove container"
+  echo "  2) Deactivate — stop container, disable auto-restart (keeps container on disk)"
+  echo "  3) Cancel"
+  read -r -p "Enter 1, 2, or 3: " mode
+
+  case "$mode" in
+    1)
+      echo -e "${RED}Full cleanup selected.${NC}"
+      read -r -p "Type 'yes' to confirm: " answer
+      [ "$answer" != "yes" ] && { info "Full cleanup skipped"; return; }
+      info "Stopping and removing container..."
+      s "docker stop $CONTAINER 2>/dev/null; docker rm $CONTAINER"
+      del "$CONTAINER — stopped and permanently removed"
+      s "docker ps -a --format '{{.Names}}' | grep -q ^${CONTAINER}$" && \
+        warn "Container still present" || ok "Container fully removed"
+      info "Docker image still on disk (remove manually if desired):"
+      s "docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}' | head -5"
+      ;;
+    2)
+      echo -e "${YELLOW}Deactivate selected.${NC}"
+      info "Stopping container and disabling auto-restart..."
+      s "docker stop $CONTAINER" && del "$CONTAINER — stopped"
+      s "docker update --restart=no $CONTAINER" && chg "RestartPolicy: always → no"
+      ok "Container deactivated — will not start on reboot"
+      info "To re-activate: docker start $CONTAINER && docker update --restart=always $CONTAINER"
+      ;;
+    *)
+      info "Cleanup cancelled"
+      return
+      ;;
+  esac
+
+  rm -f /tmp/awg-test-dir 2>/dev/null || true
+
+  sep
+  ok "Cleanup complete"
+}
+
+# ---------------------------------------------------------------------------
+# Interactive menu
+# ---------------------------------------------------------------------------
+do_interactive() {
+  print_summary
+  echo "Select phase(s) — enter numbers separated by space:"
+  echo "  1) Preflight (read-only checks)"
+  echo "  2) Setup AmneziaWG (PPA + native tunnel)"
+  echo "  3) Enable systemd service"
+  echo "  4) Setup iptables (NAT/forward rules)"
+  echo "  5) Test + manual verification"
+  echo "  6) Cleanup (remove Docker container)"
+  echo "  7) Restore (revert to Docker)"
+  echo "  8) Full run (1 → 2 → 3 → 4 → 5)"
+  echo "  9) Quit"
+  read -r -p "> " choices
+
+  for c in $choices; do
+    case "$c" in
+      1) do_preflight ;;
+      2) do_setup_awg ;;
+      3) do_enable_service ;;
+      4) do_setup_iptables ;;
+      5) do_test ;;
+      6) do_cleanup ;;
+      7) do_restore ;;
+      8) do_preflight; do_setup_awg; do_enable_service; do_setup_iptables; do_test ;;
+      9) exit 0 ;;
+      *) warn "Invalid: $c" ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  print_summary
+  case "${1:-}" in
+    --preflight)        do_preflight ;;
+    --setup-awg)        do_setup_awg ;;
+    --enable-service)   do_enable_service ;;
+    --setup-iptables)   do_setup_iptables ;;
+    --test)             do_test ;;
+    --cleanup)          do_cleanup ;;
+    --restore)          do_restore ;;
+    --help)             exit 0 ;;
+    "")                 do_interactive ;;
+    *)                  echo "Unknown: $1"; exit 1 ;;
+  esac
+}
+
+main "$@"
