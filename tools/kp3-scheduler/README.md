@@ -96,7 +96,7 @@
 
 ## Шаги работы
 
-### 1. Diff
+### 1. Diff (режим по-умолчанию)
 - Full outer join списков ФИО из schedules.xlsx и списка из employees.docx
 - Получаем список пар [ФИО schedules|null, ФИО employess|null, метка employees]
 - Пары должны быть отсортированы по алфавиту по обоим ФИО сразу

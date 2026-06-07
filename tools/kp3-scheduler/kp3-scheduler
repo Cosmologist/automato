@@ -715,21 +715,23 @@ def step_merge() -> None:
             print(f"\n{GREEN}→{NC} Alternatives added, Clean sheet removed.", file=sys.stderr)
             print(f"{GREEN}→{NC} Re-run the script to apply changes with new alternatives.", file=sys.stderr)
             sys.exit(0)
+    sm.render(ws)
+    main_idx = wb.sheetnames.index(ws.title)
     ans = input("\nContinue with render to Merge? (y/N): ").strip().lower()
-    if ans != "y":
-        wb.close()
-        return
-    sheet_name = "Merge"
-    if sheet_name in wb.sheetnames:
-        del wb[sheet_name]
-    ws_new = wb.create_sheet(sheet_name)
-    sm.render(ws_new)
-    new_sep = _find_sep_idx(ws_new)
-    if new_sep is not None:
-        _renumber_column_a(ws_new, new_sep)
+    if ans == "y":
+        sheet_name = "Merge"
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+        ws_new = wb.create_sheet(sheet_name)
+        sm.render(ws_new)
+        new_sep = _find_sep_idx(ws_new)
+        if new_sep is not None:
+            _renumber_column_a(ws_new, new_sep)
+        print(f"{GREEN}→{NC} Merged data written to sheet '{sheet_name}'.", file=sys.stderr)
+    wb.active = main_idx
     wb.save(SCHEDULES_FILE)
     wb.close()
-    print(f"{GREEN}→{NC} Merged data written to sheet '{sheet_name}'.", file=sys.stderr)
+    print(f"{GREEN}→{NC} Merge data applied to main sheet.", file=sys.stderr)
     ans = input("\nContinue with pretty? (y/N): ").strip().lower()
     if ans == "y":
         step_pretty()
@@ -762,6 +764,8 @@ def step_pretty() -> None:
                 sm.set_cell(r, c, fill=B8CCE4_FILL)
                 total += 1
     print(f"{GREEN}→{NC} Filled {total} empty cells with #B8CCE4", file=sys.stderr)
+    sm.render(ws)
+    main_idx = wb.sheetnames.index(ws.title)
     sheet_name = "Pretty"
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
@@ -770,6 +774,7 @@ def step_pretty() -> None:
     new_sep = _find_sep_idx(ws_new)
     if new_sep is not None:
         _renumber_column_a(ws_new, new_sep)
+    wb.active = main_idx
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Pretty data written to sheet '{sheet_name}'.", file=sys.stderr)
