@@ -545,14 +545,20 @@ def step_clean() -> None:
     for emp in to_remove:
         print(f"{RED}-{NC} Row {emp['row_num']}: {emp['fio']}")
         sm.remove(lambda r, e=emp: r == e["row_num"])
+    sm.render(ws)
+    main_idx = wb.sheetnames.index(ws.title)
     sheet_name = "Clean"
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
     ws_new = wb.create_sheet(sheet_name)
     sm.render(ws_new)
+    sep_idx = _find_sep_idx(ws)
+    if sep_idx is not None:
+        _renumber_column_a(ws, sep_idx)
     sep_idx = _find_sep_idx(ws_new)
     if sep_idx is not None:
         _renumber_column_a(ws_new, sep_idx)
+    wb.active = main_idx
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Cleaned data written to sheet '{sheet_name}'.", file=sys.stderr)
