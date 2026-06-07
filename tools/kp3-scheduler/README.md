@@ -97,7 +97,7 @@
 ## Шаги работы
 
 ### 1. Diff (режим по-умолчанию)
-- Full outer join списков ФИО из schedules.xlsx и списка из employees.docx
+- Full outer join списков ФИО из schedules.xlsx, SheetMapping(schedules.xlsx) и списка из employees.docx
 - Получаем список пар [ФИО schedules|null, ФИО employess|null, метка employees]
 - Пары должны быть отсортированы по алфавиту по обоим ФИО сразу
 - Вывод в консоль на проверку как таблицу вида: ФИО schedules, ФИО employees, метка employees
@@ -109,9 +109,9 @@
 - Запрос пользователя на продолжение работы - этап Merge
 
 ### 3. Merge
-- Обнуляем все значения графика в schedules.xlsx - кроме заголовков и ФИО
+- Обнуляем все значения графика в SheetMapping(schedules.xlsx) - кроме заголовков и ФИО
 - Проходим по всем ./departs/*.xlsx
-- если schedules.xlsx не содержит такого ФИО - вставляем его в SheetMapping(schedules.xlsx) первую таблицу - посвечиваем зеленым
+- если SheetMapping(schedules.xlsx) не содержит такого ФИО - вставляем его в SheetMapping(schedules.xlsx) первую таблицу - посвечиваем зеленым
 - Собрать ФИО которые не найдены ни в одном ./departs/*.xlsx:
   - вывести предупреждение по ним
    - предложить в интерактивном режиме добавить в ./fio-alternatives.txt - если добавляем, то потом удаляем лист Clean, завершаем работу, выводим сообщение пользователю о необходимости перезапуска 
@@ -123,6 +123,7 @@
 ### 4. Pretty
 - Пробегаем по всем данным графика SheetMapping(schedules.xlsx) первой таблицы
 - Если ячейка пустая делаем ее бэкграунд #B8CCE4
+- Рендер SheetMapping(schedules.xlsx) в лист с именем Merge в schedules.xlsx
 
 ### 5. Complete
 Сообщаем о успешном завершении
