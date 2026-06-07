@@ -114,7 +114,7 @@ def is_fio_cell(val: Any) -> bool:
     parts = s.split()
     if len(parts) != 3:
         return False
-    return all(re.match(r"^[а-яё]+$", p.lower()) for p in parts)
+    return all(re.match(r"^[а-яёА-ЯЁ]+$", p) for p in parts)
 
 def fio_key(name: str) -> str:
     return normalize_fio(name).lower()
