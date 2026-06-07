@@ -20,10 +20,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEDULES_FILE = SCRIPT_DIR / "schedules.xlsx"
 EMPLOYEES_FILE = SCRIPT_DIR / "employees.docx"
 DEPARTS_DIR = SCRIPT_DIR / "departs"
+FIO_ALT_FILE = SCRIPT_DIR / "fio-alternatives.txt"
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
 YELLOW = "\033[1;33m"
 NC = "\033[0m"
+
+_FIO_ALTERNATIVES: dict[str, str] | None = None
 
 # ── Summary ──────────────────────────────────────────────────
 
@@ -37,6 +40,7 @@ Usage:
   {Path(sys.argv[0]).name} clean          — Remove rows without pair in employees
   {Path(sys.argv[0]).name} merge          — Merge depart data into schedules
   {Path(sys.argv[0]).name} pretty         — Style empty cells in schedule data
+  {Path(sys.argv[0]).name} complete       — Show completion message
   {Path(sys.argv[0]).name}                — Interactive mode
 
 Examples:
@@ -64,8 +68,37 @@ def preflight(mode: str = "") -> None:
 
 # ── FIO helpers ──────────────────────────────────────────────
 
+def _pre_normalize(s: str) -> str:
+    s = re.sub(r"\(ученик\)", "", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip().lower()
+
+def _load_fio_alternatives() -> dict[str, str]:
+    global _FIO_ALTERNATIVES
+    if _FIO_ALTERNATIVES is not None:
+        return _FIO_ALTERNATIVES
+    _FIO_ALTERNATIVES = {}
+    if not FIO_ALT_FILE.exists():
+        return _FIO_ALTERNATIVES
+    for line in FIO_ALT_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" not in line:
+            continue
+        alt, correct = line.split("|", 1)
+        alt = alt.strip()
+        correct = correct.strip()
+        if alt and correct:
+            _FIO_ALTERNATIVES[_pre_normalize(alt)] = correct
+    return _FIO_ALTERNATIVES
+
 def normalize_fio(name: str) -> str:
     s = str(name) if name is not None else ""
+    pre = _pre_normalize(s)
+    alts = _load_fio_alternatives()
+    if pre in alts:
+        s = alts[pre]
     s = re.sub(r"\(ученик\)", "", s)
     s = s.replace("ё", "е").replace("Ё", "Е")
     s = re.sub(r"\d+/\d+", "", s)
@@ -419,7 +452,8 @@ def interactive_prompt() -> argparse.Namespace:
     print("  2) Clean  — remove rows without pair in employees", file=sys.stderr)
     print("  3) Merge  — merge depart data into schedules", file=sys.stderr)
     print("  4) Pretty — style empty cells in schedule data", file=sys.stderr)
-    choice = input("Enter number [1-4]: ").strip()
+    print("  5) Complete — show completion message", file=sys.stderr)
+    choice = input("Enter number [1-5]: ").strip()
     args = argparse.Namespace()
     match choice:
         case "1":
@@ -430,6 +464,8 @@ def interactive_prompt() -> argparse.Namespace:
             args.mode = "merge"
         case "4":
             args.mode = "pretty"
+        case "5":
+            args.mode = "complete"
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
             sys.exit(1)
@@ -518,6 +554,9 @@ def step_clean() -> None:
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Cleaned data written to sheet '{sheet_name}'.", file=sys.stderr)
+    ans = input("\nContinue with merge? (y/N): ").strip().lower()
+    if ans == "y":
+        step_merge()
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 3: Merge
@@ -640,14 +679,33 @@ def step_merge() -> None:
             missing_fios.append(entry["fio"])
     if missing_fios:
         print(f"\n{YELLOW}Warning:{NC} FIOs not found in any depart file:")
+        added_any = False
         for fio in missing_fios:
             print(f"  {RED}{fio}{NC}")
-            for r in range(t1_start, sm.max_row + 1):
-                cell = sm.get_cell(r, 2)
-                if cell and cell.value and normalize_fio(str(cell.value)) == fio:
-                    for c in range(1, sm.max_col + 1):
-                        sm.set_cell(r, c, fill=RED_FILL)
-                    break
+            ans = input(f"  Add alternative spelling for '{fio}' to fio-alternatives.txt? (y/N): ").strip().lower()
+            if ans == "y":
+                alt = input("  Enter alternative spelling: ").strip()
+                if alt:
+                    with open(FIO_ALT_FILE, "a", encoding="utf-8") as f:
+                        f.write(f"{alt} | {fio}\n")
+                    print(f"  {GREEN}+{NC} Added to {FIO_ALT_FILE.name}")
+                    _FIO_ALTERNATIVES[_pre_normalize(alt)] = fio
+                    added_any = True
+            else:
+                for r in range(t1_start, sm.max_row + 1):
+                    cell = sm.get_cell(r, 2)
+                    if cell and cell.value and normalize_fio(str(cell.value)) == fio:
+                        for c in range(1, sm.max_col + 1):
+                            sm.set_cell(r, c, fill=RED_FILL)
+                        break
+        if added_any:
+            if "Clean" in wb.sheetnames:
+                del wb["Clean"]
+            wb.save(SCHEDULES_FILE)
+            wb.close()
+            print(f"\n{GREEN}→{NC} Alternatives added, Clean sheet removed.", file=sys.stderr)
+            print(f"{GREEN}→{NC} Re-run the script to apply changes with new alternatives.", file=sys.stderr)
+            sys.exit(0)
     ans = input("\nContinue with render to Merge? (y/N): ").strip().lower()
     if ans != "y":
         wb.close()
@@ -663,6 +721,9 @@ def step_merge() -> None:
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Merged data written to sheet '{sheet_name}'.", file=sys.stderr)
+    ans = input("\nContinue with pretty? (y/N): ").strip().lower()
+    if ans == "y":
+        step_pretty()
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 4: Pretty
@@ -705,6 +766,15 @@ def step_pretty() -> None:
     print(f"{GREEN}→{NC} Pretty data written to sheet '{sheet_name}'.", file=sys.stderr)
 
 # ═══════════════════════════════════════════════════════════════
+# STEP 5: Complete
+# ═══════════════════════════════════════════════════════════════
+
+def step_complete() -> None:
+    print(f"\n{GREEN}{'='*50}{NC}")
+    print(f"{GREEN}  ✓ kp3-scheduler completed successfully!{NC}")
+    print(f"{GREEN}{'='*50}{NC}")
+
+# ═══════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════
 
@@ -727,9 +797,12 @@ def main() -> None:
         step_merge()
     elif ns.mode in ("pretty"):
         step_pretty()
+        step_complete()
+    elif ns.mode in ("complete"):
+        step_complete()
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: diff, clean, merge, pretty", file=sys.stderr)
+        print("  Valid modes: diff, clean, merge, pretty, complete", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
