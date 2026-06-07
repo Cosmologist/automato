@@ -537,6 +537,7 @@ def step_clean() -> None:
     to_remove.sort(key=lambda e: e["row_num"], reverse=True)
     if not to_remove:
         print(f"{GREEN}→{NC} Nothing to remove — all schedule rows have a pair in employees.", file=sys.stderr)
+        step_merge()
         return
     print(f"Removing {len(to_remove)} rows...", file=sys.stderr)
     wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
