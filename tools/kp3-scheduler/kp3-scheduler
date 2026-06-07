@@ -105,6 +105,7 @@ def normalize_fio(name: str) -> str:
     s = s.replace("ё", "е").replace("Ё", "Е")
     s = re.sub(r"\d+/\d+", "", s)
     s = re.sub(r"\s+", " ", s)
+    s = " ".join(w[0].upper() + w[1:].lower() if w else w for w in s.split())
     return s.strip()
 
 def is_fio_cell(val: Any) -> bool:
