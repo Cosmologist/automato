@@ -1,0 +1,736 @@
+#!/usr/bin/env python3
+"""kp3-scheduler — Update employee schedules in schedules.xlsx"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from copy import copy
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
+
+import openpyxl
+from docx import Document
+from openpyxl.styles import Font, PatternFill, Border, Alignment
+from openpyxl.utils import get_column_letter
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SCHEDULES_FILE = SCRIPT_DIR / "schedules.xlsx"
+EMPLOYEES_FILE = SCRIPT_DIR / "employees.docx"
+DEPARTS_DIR = SCRIPT_DIR / "departs"
+GREEN = "\033[0;32m"
+RED = "\033[0;31m"
+YELLOW = "\033[1;33m"
+NC = "\033[0m"
+
+# ── Summary ──────────────────────────────────────────────────
+
+def print_summary() -> None:
+    print(
+        f"""--- kp3-scheduler ---
+Updates employee schedules in schedules.xlsx from departs and employees data.
+
+Usage:
+  {Path(sys.argv[0]).name} diff           — Compare schedules vs employees
+  {Path(sys.argv[0]).name} clean          — Remove rows without pair in employees
+  {Path(sys.argv[0]).name} merge          — Merge depart data into schedules
+  {Path(sys.argv[0]).name} pretty         — Style empty cells in schedule data
+  {Path(sys.argv[0]).name}                — Interactive mode
+
+Examples:
+  {Path(sys.argv[0]).name} diff
+  {Path(sys.argv[0]).name} clean
+  {Path(sys.argv[0]).name} merge
+  {Path(sys.argv[0]).name} pretty
+  {Path(sys.argv[0]).name}
+""",
+        file=sys.stderr,
+    )
+
+# ── Pre-flight checks ────────────────────────────────────────
+
+def preflight(mode: str = "") -> None:
+    if not SCHEDULES_FILE.exists():
+        print(f"Error: file not found: {SCHEDULES_FILE}", file=sys.stderr)
+        sys.exit(1)
+    if mode in ("diff", "clean") and not EMPLOYEES_FILE.exists():
+        print(f"Error: file not found: {EMPLOYEES_FILE}", file=sys.stderr)
+        sys.exit(1)
+    if mode in ("merge",) and not DEPARTS_DIR.is_dir():
+        print(f"Error: directory not found: {DEPARTS_DIR}", file=sys.stderr)
+        sys.exit(1)
+
+# ── FIO helpers ──────────────────────────────────────────────
+
+def normalize_fio(name: str) -> str:
+    s = str(name) if name is not None else ""
+    s = re.sub(r"\(ученик\)", "", s)
+    s = s.replace("ё", "е").replace("Ё", "Е")
+    s = re.sub(r"\d+/\d+", "", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+def is_fio_cell(val: Any) -> bool:
+    s = normalize_fio(str(val or ""))
+    if not s:
+        return False
+    parts = s.split()
+    if len(parts) != 3:
+        return False
+    return all(re.match(r"^[А-ЯЁ][а-яё]+$", p) for p in parts)
+
+def fio_key(name: str) -> str:
+    return normalize_fio(name).lower()
+
+# ── Cell data ────────────────────────────────────────────────
+
+@dataclass
+class CellData:
+    value: Any
+    font: Font
+    fill: PatternFill
+    border: Border
+    alignment: Alignment
+    number_format: str
+
+# ── SheetMapping ─────────────────────────────────────────────
+
+class SheetMapping:
+    def __init__(self, ws: openpyxl.worksheet.worksheet.Worksheet | None = None):
+        self.cells: dict[tuple[int, int], CellData] = {}
+        self.merged: list[tuple[int, int, int, int]] = []
+        self.row_heights: dict[int, float] = {}
+        self.col_widths: dict[int, float] = {}
+        self.max_row = 0
+        self.max_col = 0
+        if ws is not None:
+            self.load(ws)
+
+    def load(self, ws: openpyxl.worksheet.worksheet.Worksheet) -> None:
+        self.max_row = ws.max_row or 0
+        self.max_col = ws.max_column or 0
+        for mr in ws.merged_cells.ranges:
+            self.merged.append((mr.min_row, mr.min_col, mr.max_row, mr.max_col))
+        for r in range(1, self.max_row + 1):
+            h = ws.row_dimensions[r].height
+            if h:
+                self.row_heights[r] = h
+        for c in range(1, self.max_col + 1):
+            w = ws.column_dimensions[get_column_letter(c)].width
+            if w:
+                self.col_widths[c] = w
+        for (r, c), cell in ws._cells.items():
+            if r > self.max_row or c > self.max_col:
+                continue
+            self.cells[(r, c)] = CellData(
+                value=copy(cell.value),
+                font=copy(cell.font),
+                fill=copy(cell.fill),
+                border=copy(cell.border),
+                alignment=copy(cell.alignment),
+                number_format=cell.number_format,
+            )
+
+    def remove(self, condition: Callable[[int], bool]) -> None:
+        to_remove = sorted(
+            [r for r in range(1, self.max_row + 1) if condition(r)],
+            reverse=True,
+        )
+        for row_num in to_remove:
+            keys = [(r, c) for (r, c) in self.cells if r == row_num]
+            for k in keys:
+                del self.cells[k]
+            new_cells = {}
+            for (r, c), data in self.cells.items():
+                new_cells[(r - 1 if r > row_num else r, c)] = data
+            self.cells = new_cells
+            new_merged = []
+            for r1, c1, r2, c2 in self.merged:
+                if r1 > row_num and r2 > row_num:
+                    new_merged.append((r1 - 1, c1, r2 - 1, c2))
+                elif r1 <= row_num <= r2:
+                    if r1 == row_num and r2 == row_num:
+                        continue
+                    new_merged.append((r1, c1, r2 - 1, c2))
+                else:
+                    new_merged.append((r1, c1, r2, c2))
+            self.merged = new_merged
+            new_heights = {}
+            for r, h in self.row_heights.items():
+                new_heights[r - 1 if r > row_num else r] = h
+            self.row_heights = new_heights
+            self.max_row -= 1
+
+    def insert(self, after_row: int) -> int:
+        new_cells = {}
+        for (r, c), data in self.cells.items():
+            new_cells[(r + 1 if r > after_row else r, c)] = data
+        self.cells = new_cells
+        new_merged = []
+        for r1, c1, r2, c2 in self.merged:
+            if r1 > after_row and r2 > after_row:
+                new_merged.append((r1 + 1, c1, r2 + 1, c2))
+            elif r1 <= after_row < r2:
+                new_merged.append((r1, c1, r2 + 1, c2))
+            else:
+                new_merged.append((r1, c1, r2, c2))
+        self.merged = new_merged
+        new_heights = {}
+        for r, h in self.row_heights.items():
+            new_heights[r + 1 if r > after_row else r] = h
+        self.row_heights = new_heights
+        self.max_row += 1
+        return after_row + 1
+
+    def set_cell(self, row: int, col: int, value: Any = None, fill: PatternFill | None = None) -> None:
+        key = (row, col)
+        if key in self.cells:
+            if value is not None:
+                self.cells[key].value = value
+            if fill is not None:
+                self.cells[key].fill = fill
+        else:
+            self.cells[key] = CellData(
+                value=value,
+                font=Font(),
+                fill=fill or PatternFill(),
+                border=Border(),
+                alignment=Alignment(),
+                number_format="General",
+            )
+
+    def get_cell(self, row: int, col: int) -> CellData | None:
+        return self.cells.get((row, col))
+
+    def clone_row_style(self, from_row: int, to_row: int) -> None:
+        entries = [(c, data) for (r, c), data in self.cells.items() if r == from_row]
+        for c, data in entries:
+            self.cells[(to_row, c)] = CellData(
+                value=None,
+                font=copy(data.font),
+                fill=copy(data.fill),
+                border=copy(data.border),
+                alignment=copy(data.alignment),
+                number_format=data.number_format,
+            )
+
+    def render(self, ws: openpyxl.worksheet.worksheet.Worksheet) -> None:
+        for mr in list(ws.merged_cells.ranges):
+            ws.unmerge_cells(str(mr))
+        if ws.max_row and ws.max_column:
+            ws.delete_rows(1, ws.max_row)
+        for (r, c), data in self.cells.items():
+            cell = ws.cell(row=r, column=c)
+            cell.value = data.value
+            cell.font = copy(data.font)
+            cell.fill = copy(data.fill)
+            cell.border = copy(data.border)
+            cell.alignment = copy(data.alignment)
+            cell.number_format = data.number_format
+        for r1, c1, r2, c2 in self.merged:
+            ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+        for r, h in self.row_heights.items():
+            ws.row_dimensions[r].height = h
+        for c, w in self.col_widths.items():
+            ws.column_dimensions[get_column_letter(c)].width = w
+        trim_trailing_rows(ws)
+
+    def iter_rows_in_range(self, start: int, end: int) -> list[int]:
+        return sorted({r for (r, c) in self.cells if start <= r <= end})
+
+# ── Schedules parser ─────────────────────────────────────────
+
+def parse_schedules(filepath: Path) -> dict:
+    wb = openpyxl.load_workbook(filepath, data_only=True, keep_vba=False)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column))
+    empty_indices = [
+        i for i, row in enumerate(rows)
+        if all(c.value is None for c in row)
+    ]
+    if not empty_indices:
+        print("Error: cannot find table separator (empty row)", file=sys.stderr)
+        sys.exit(1)
+    sep_idx = empty_indices[0]
+    tables = []
+    t1_employees = []
+    for r in rows[2:sep_idx]:
+        num_cell = r[0].value
+        fio_raw = str(r[1].value or "")
+        if num_cell is None:
+            continue
+        t1_employees.append({
+            "row_num": r[0].row,
+            "fio_raw": fio_raw,
+            "fio": normalize_fio(fio_raw),
+        })
+    tables.append({"header_rows": 2, "employees": t1_employees})
+    t2_employees = []
+    for r in rows[sep_idx + 2:]:
+        num_cell = r[0].value
+        fio_raw = str(r[1].value or "")
+        if num_cell is None:
+            continue
+        t2_employees.append({
+            "row_num": r[0].row,
+            "fio_raw": fio_raw,
+            "fio": normalize_fio(fio_raw),
+        })
+    tables.append({"header_rows": 1, "employees": t2_employees})
+    wb.close()
+    return {"tables": tables, "filepath": str(filepath), "sep_idx": sep_idx}
+
+def get_schedule_data_count(ws) -> int:
+    count = 0
+    for c in range(3, (ws.max_column or 0) + 1):
+        if ws.cell(row=1, column=c).value is not None:
+            count += 1
+    return count
+
+def get_all_schedule_employees() -> list[dict]:
+    data = parse_schedules(SCHEDULES_FILE)
+    result = []
+    for ti, tbl in enumerate(data["tables"]):
+        for emp in tbl["employees"]:
+            result.append({**emp, "table_index": ti})
+    result.sort(key=lambda e: fio_key(e["fio"]))
+    return result
+
+# ── DOCX parser ──────────────────────────────────────────────
+
+def parse_employees(filepath: Path) -> list[dict]:
+    doc = Document(str(filepath))
+    table = doc.tables[0]
+    result = []
+    for row in table.rows[1:]:
+        cells = [c.text.strip() for c in row.cells]
+        if len(cells) < 2:
+            continue
+        fio_raw = cells[1]
+        label_raw = cells[2] if len(cells) > 2 else ""
+        fio = normalize_fio(fio_raw.rstrip(",").strip())
+        if not fio:
+            continue
+        result.append({
+            "fio_raw": fio_raw,
+            "fio": fio,
+            "label": label_raw,
+        })
+    result.sort(key=lambda e: fio_key(e["fio"]))
+    return result
+
+# ── Spiral search ────────────────────────────────────────────
+
+def spiral_find_fio(ws) -> tuple[int, int] | None:
+    max_row = ws.max_row or 0
+    max_col = ws.max_column or 0
+    limit = max(max_row, max_col)
+    for N in range(1, limit + 1):
+        if N <= max_col:
+            for r in range(1, N + 1):
+                if r <= max_row:
+                    val = ws.cell(row=r, column=N).value
+                    if is_fio_cell(val):
+                        return (N, r)
+        if N <= max_row:
+            for c in range(N - 1, 0, -1):
+                if c <= max_col:
+                    val = ws.cell(row=N, column=c).value
+                    if is_fio_cell(val):
+                        return (c, N)
+    return None
+
+# ── Sheet trim helper ────────────────────────────────────────
+
+def trim_trailing_rows(ws) -> None:
+    for r in range((ws.max_row or 0), 0, -1):
+        has_value = False
+        for c in range(1, (ws.max_column or 0) + 1):
+            if (r, c) in ws._cells and ws._cells[(r, c)].value is not None:
+                has_value = True
+                break
+        if has_value:
+            if r < (ws.max_row or 0):
+                ws.delete_rows(r + 1, (ws.max_row or 0) - r)
+            return
+
+# ── Depart scanner ───────────────────────────────────────────
+
+def scan_depart_file(filepath: Path, data_count: int) -> list[dict]:
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+    if ws.max_row is None or ws.max_column is None:
+        wb.close()
+        return []
+    pos = spiral_find_fio(ws)
+    if pos is None:
+        wb.close()
+        return []
+    fio_col, start_row = pos
+    max_row = ws.max_row
+    max_col = ws.max_column
+    data_end = min(fio_col + data_count, max_col)
+    employees = []
+    for r in range(start_row, max_row + 1):
+        cell_val = ws.cell(row=r, column=fio_col).value
+        if cell_val is None:
+            break
+        cleaned = normalize_fio(str(cell_val))
+        if not cleaned or not is_fio_cell(cell_val):
+            if cleaned:
+                continue
+            break
+        data = []
+        for c in range(fio_col + 1, data_end + 1):
+            data.append(ws.cell(row=r, column=c).value)
+        employees.append({"fio": cleaned, "data": data})
+    wb.close()
+    return employees
+
+# ── Renumber helper ──────────────────────────────────────────
+
+def _renumber_column_a(ws, sep_idx: int) -> None:
+    num = 1
+    for r in range(3, sep_idx + 1):
+        cell = ws.cell(row=r, column=1)
+        if cell.value is not None:
+            cell.value = num
+            num += 1
+    num = 1
+    for r in range(sep_idx + 3, ws.max_row + 1):
+        cell = ws.cell(row=r, column=1)
+        if cell.value is not None:
+            cell.value = num
+            num += 1
+
+def _find_sep_idx(ws) -> int | None:
+    for i, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column)):
+        if all(c.value is None for c in row):
+            return i
+    return None
+
+# ── Interactive prompt ───────────────────────────────────────
+
+def interactive_prompt() -> argparse.Namespace:
+    print("Select action:", file=sys.stderr)
+    print("  1) Diff   — compare schedules vs employees", file=sys.stderr)
+    print("  2) Clean  — remove rows without pair in employees", file=sys.stderr)
+    print("  3) Merge  — merge depart data into schedules", file=sys.stderr)
+    print("  4) Pretty — style empty cells in schedule data", file=sys.stderr)
+    choice = input("Enter number [1-4]: ").strip()
+    args = argparse.Namespace()
+    match choice:
+        case "1":
+            args.mode = "diff"
+        case "2":
+            args.mode = "clean"
+        case "3":
+            args.mode = "merge"
+        case "4":
+            args.mode = "pretty"
+        case _:
+            print(f"Invalid choice: {choice}", file=sys.stderr)
+            sys.exit(1)
+    return args
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 1: Diff
+# ═══════════════════════════════════════════════════════════════
+
+def step_diff() -> None:
+    sched = get_all_schedule_employees()
+    emp = parse_employees(EMPLOYEES_FILE)
+    emp_by_fio = {fio_key(e["fio"]): e for e in emp}
+    rows: list[tuple[str, str, str, str]] = []
+    i = j = 0
+    while i < len(sched) and j < len(emp):
+        ki = fio_key(sched[i]["fio"])
+        kj = fio_key(emp[j]["fio"])
+        if ki == kj:
+            label = emp_by_fio[ki].get("label", "")
+            rows.append((sched[i]["fio"], emp[j]["fio"], label, ""))
+            i += 1
+            j += 1
+        elif ki < kj:
+            rows.append((sched[i]["fio"], "", "", RED))
+            i += 1
+        else:
+            label = emp[j].get("label", "")
+            rows.append(("", emp[j]["fio"], label, GREEN))
+            j += 1
+    for e in sched[i:]:
+        rows.append((e["fio"], "", "", RED))
+    for e in emp[j:]:
+        rows.append(("", e["fio"], e.get("label", ""), GREEN))
+    n_width = len(str(len(rows)))
+    w1 = max((len(r[0]) for r in rows), default=0)
+    w2 = max((len(r[1]) for r in rows), default=0)
+    w1 = max(w1, len("schedule"))
+    w2 = max(w2, len("employees"))
+    sep = "  "
+    hdr = f"{'#'.ljust(n_width)}{sep}{'schedule'.ljust(w1)}{sep}{'employees'.ljust(w2)}{sep}label"
+    print(hdr)
+    print("-" * len(hdr))
+    for idx, (s_fio, e_fio, label, color) in enumerate(rows, start=1):
+        line = f"{str(idx).ljust(n_width)}{sep}{s_fio.ljust(w1)}{sep}{e_fio.ljust(w2)}{sep}{label}"
+        if color:
+            print(f"{color}{line}{NC}")
+        else:
+            print(line)
+    red_count = sum(1 for _, _, _, c in rows if c == RED)
+    green_count = sum(1 for _, _, _, c in rows if c == GREEN)
+    print(f"\n{GREEN}→{NC} Only in schedule (RED): {red_count}")
+    print(f"{GREEN}→{NC} Only in employees (GREEN): {green_count}")
+    ans = input("\nContinue with clean? (y/N): ").strip().lower()
+    if ans == "y":
+        step_clean()
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 2: Clean
+# ═══════════════════════════════════════════════════════════════
+
+def step_clean() -> None:
+    docx_employees = parse_employees(EMPLOYEES_FILE)
+    docx_fios = {fio_key(e["fio"]) for e in docx_employees}
+    sched_employees = get_all_schedule_employees()
+    to_remove = [e for e in sched_employees if fio_key(e["fio"]) not in docx_fios]
+    to_remove.sort(key=lambda e: e["row_num"], reverse=True)
+    if not to_remove:
+        print(f"{GREEN}→{NC} Nothing to remove — all schedule rows have a pair in employees.", file=sys.stderr)
+        return
+    print(f"Removing {len(to_remove)} rows...", file=sys.stderr)
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+    ws = wb.active
+    sm = SheetMapping(ws)
+    for emp in to_remove:
+        print(f"{RED}-{NC} Row {emp['row_num']}: {emp['fio']}")
+        sm.remove(lambda r, e=emp: r == e["row_num"])
+    sheet_name = "Clean"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+    sep_idx = _find_sep_idx(ws_new)
+    if sep_idx is not None:
+        _renumber_column_a(ws_new, sep_idx)
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+    print(f"{GREEN}→{NC} Cleaned data written to sheet '{sheet_name}'.", file=sys.stderr)
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 3: Merge
+# ═══════════════════════════════════════════════════════════════
+
+def step_merge() -> None:
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+    ws = wb.active
+    sm = SheetMapping(ws)
+    sep_idx = _find_sep_idx(ws)
+    if sep_idx is None:
+        print(f"{RED}Error:{NC} cannot find table separator", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+    data_count = get_schedule_data_count(ws)
+    if data_count == 0:
+        print(f"{RED}Error:{NC} cannot determine data column count", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+    t1_start = 3
+    t1_end = sep_idx
+    t2_header = sep_idx + 2
+    t2_start = t2_header + 1
+    GREEN_FILL = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+    RED_FILL = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    clear_count = 0
+    for r in range(t1_start, t1_end + 1):
+        for c in range(3, 3 + data_count):
+            cell = sm.get_cell(r, c)
+            if cell is not None and cell.value is not None:
+                cell.value = None
+                clear_count += 1
+    for r in range(t2_start, sm.max_row + 1):
+        for c in range(3, 3 + data_count):
+            cell = sm.get_cell(r, c)
+            if cell is not None and cell.value is not None:
+                cell.value = None
+                clear_count += 1
+    print(f"{GREEN}→{NC} Cleared {clear_count} schedule values", file=sys.stderr)
+    depart_files = sorted(DEPARTS_DIR.glob("*.xlsx"))
+    depart_files = [f for f in depart_files if not f.name.startswith(".~lock.")]
+    if not depart_files:
+        print(f"{YELLOW}skip{NC} no .xlsx files in departs/", file=sys.stderr)
+        wb.close()
+        return
+    depart_employees: dict[str, list] = {}
+    for filepath in depart_files:
+        employees = scan_depart_file(filepath, data_count)
+        if not employees:
+            print(f"{YELLOW}skip{NC} {filepath.name} — no employees found")
+            continue
+        print(f"{GREEN}→{NC} departs/{filepath.name}: {len(employees)} employees")
+        for emp in employees:
+            fk = fio_key(emp["fio"])
+            if fk not in depart_employees:
+                depart_employees[fk] = emp
+    t1_fio_map: dict[str, dict] = {}
+    for r in range(t1_start, t1_end + 1):
+        cell = sm.get_cell(r, 2)
+        if cell is None or cell.value is None:
+            continue
+        fio = normalize_fio(str(cell.value))
+        if not fio:
+            continue
+        t1_fio_map[fio_key(fio)] = {"row_num": r, "fio": fio}
+    existing_keys = {fk for fk in depart_employees if fk in t1_fio_map}
+    new_keys = sorted(
+        [fk for fk in depart_employees if fk not in t1_fio_map],
+        key=lambda fk: fk,
+    )
+    inserted_count = 0
+    for fk in new_keys:
+        emp = depart_employees[fk]
+        sorted_existing = sorted(t1_fio_map.values(), key=lambda e: fio_key(e["fio"]))
+        pos = 0
+        for idx, ee in enumerate(sorted_existing):
+            if fk < fio_key(ee["fio"]):
+                pos = idx
+                break
+        else:
+            pos = len(sorted_existing)
+        if pos == 0:
+            after_row = t1_start - 1
+        else:
+            after_row = sorted_existing[pos - 1]["row_num"]
+        new_row = sm.insert(after_row)
+        style_src = sorted_existing[0]["row_num"] if sorted_existing else t1_start
+        sm.clone_row_style(style_src, new_row)
+        sm.set_cell(new_row, 1, value=0)
+        sm.set_cell(new_row, 2, value=emp["fio"], fill=GREEN_FILL)
+        for di in range(data_count):
+            val = emp["data"][di] if di < len(emp["data"]) else None
+            sm.set_cell(new_row, 3 + di, value=val)
+        inserted_count += 1
+        t1_fio_map[fk] = {"row_num": new_row, "fio": emp["fio"]}
+        t1_end += 1
+        print(f"{GREEN}+{NC} {emp['fio']} — new (green) at row {new_row}")
+    for (r, c), data in list(sm.cells.items()):
+        if c == 2 and data.value is not None and t1_start <= r <= t1_end:
+            fio = normalize_fio(str(data.value))
+            if fio:
+                fk = fio_key(fio)
+                if fk not in t1_fio_map:
+                    t1_fio_map[fk] = {"row_num": r, "fio": fio}
+    updated_count = 0
+    for fk in existing_keys:
+        emp = depart_employees[fk]
+        entry = t1_fio_map.get(fk)
+        if entry is None:
+            continue
+        for di in range(data_count):
+            val = emp["data"][di] if di < len(emp["data"]) else None
+            sm.set_cell(entry["row_num"], 3 + di, value=val)
+        updated_count += 1
+    print(f"{GREEN}→{NC} Updated: {updated_count}, Inserted: {inserted_count}", file=sys.stderr)
+    missing_fios = []
+    for entry in t1_fio_map.values():
+        fk = fio_key(entry["fio"])
+        if fk not in depart_employees:
+            missing_fios.append(entry["fio"])
+    if missing_fios:
+        print(f"\n{YELLOW}Warning:{NC} FIOs not found in any depart file:")
+        for fio in missing_fios:
+            print(f"  {RED}{fio}{NC}")
+            for r in range(t1_start, sm.max_row + 1):
+                cell = sm.get_cell(r, 2)
+                if cell and cell.value and normalize_fio(str(cell.value)) == fio:
+                    for c in range(1, sm.max_col + 1):
+                        sm.set_cell(r, c, fill=RED_FILL)
+                    break
+    ans = input("\nContinue with render to Merge? (y/N): ").strip().lower()
+    if ans != "y":
+        wb.close()
+        return
+    sheet_name = "Merge"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+    new_sep = _find_sep_idx(ws_new)
+    if new_sep is not None:
+        _renumber_column_a(ws_new, new_sep)
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+    print(f"{GREEN}→{NC} Merged data written to sheet '{sheet_name}'.", file=sys.stderr)
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 4: Pretty
+# ═══════════════════════════════════════════════════════════════
+
+def step_pretty() -> None:
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+    ws = wb.active
+    sm = SheetMapping(ws)
+    sep_idx = _find_sep_idx(ws)
+    if sep_idx is None:
+        print(f"{RED}Error:{NC} cannot find table separator", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+    data_count = get_schedule_data_count(ws)
+    if data_count == 0:
+        print(f"{RED}Error:{NC} cannot determine data column count", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+    B8CCE4_FILL = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
+    t1_start = 3
+    total = 0
+    for r in range(t1_start, sep_idx + 1):
+        for c in range(3, 3 + data_count):
+            cell = sm.get_cell(r, c)
+            if cell is None or cell.value is None or (isinstance(cell.value, str) and cell.value.strip() == ""):
+                sm.set_cell(r, c, fill=B8CCE4_FILL)
+                total += 1
+    print(f"{GREEN}→{NC} Filled {total} empty cells with #B8CCE4", file=sys.stderr)
+    sheet_name = "Pretty"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+    new_sep = _find_sep_idx(ws_new)
+    if new_sep is not None:
+        _renumber_column_a(ws_new, new_sep)
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+    print(f"{GREEN}→{NC} Pretty data written to sheet '{sheet_name}'.", file=sys.stderr)
+
+# ═══════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════
+
+def main() -> None:
+    print_summary()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("args", nargs="*", default=[])
+    parsed = parser.parse_args()
+    if not parsed.args:
+        ns = interactive_prompt()
+    else:
+        ns = argparse.Namespace()
+        ns.mode = parsed.args[0]
+    preflight(ns.mode)
+    if ns.mode in ("diff"):
+        step_diff()
+    elif ns.mode in ("clean"):
+        step_clean()
+    elif ns.mode in ("merge"):
+        step_merge()
+    elif ns.mode in ("pretty"):
+        step_pretty()
+    else:
+        print(f"Unknown mode: {ns.mode}", file=sys.stderr)
+        print("  Valid modes: diff, clean, merge, pretty", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
