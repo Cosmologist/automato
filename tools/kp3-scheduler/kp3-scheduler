@@ -940,7 +940,6 @@ def step_pretty() -> None:
     print(f"{GREEN}→{NC} Pretty: B8CCE4={b8_total} white={white_total} OTP={otp_total}", file=sys.stderr)
     first_sheet = wb.worksheets[0]
     first_name = first_sheet.title
-    first_sheet.delete_rows(1, first_sheet.max_row or 1)
     sm.render(first_sheet)
     new_sep = _find_sep_idx(first_sheet)
     if new_sep is not None:
