@@ -39,7 +39,8 @@ Usage:
   {Path(sys.argv[0]).name} diff           — Compare schedules vs employees
   {Path(sys.argv[0]).name} clean          — Remove rows without pair in employees
   {Path(sys.argv[0]).name} merge          — Merge depart data into schedules
-  {Path(sys.argv[0]).name} pretty         — Style empty cells in schedule data
+  {Path(sys.argv[0]).name} pretty         — Style cells in schedule data
+  {Path(sys.argv[0]).name} final          — Renumber and finalize
   {Path(sys.argv[0]).name} complete       — Show completion message
   {Path(sys.argv[0]).name}                — Interactive mode
 
@@ -48,6 +49,7 @@ Examples:
   {Path(sys.argv[0]).name} clean
   {Path(sys.argv[0]).name} merge
   {Path(sys.argv[0]).name} pretty
+  {Path(sys.argv[0]).name} final
   {Path(sys.argv[0]).name}
 """,
         file=sys.stderr,
@@ -456,9 +458,10 @@ def interactive_prompt() -> argparse.Namespace:
     print("  1) Diff   — compare schedules vs employees", file=sys.stderr)
     print("  2) Clean  — remove rows without pair in employees", file=sys.stderr)
     print("  3) Merge  — merge depart data into schedules", file=sys.stderr)
-    print("  4) Pretty — style empty cells in schedule data", file=sys.stderr)
-    print("  5) Complete — show completion message", file=sys.stderr)
-    choice = input("Enter number [1-5]: ").strip()
+    print("  4) Pretty — style cells in schedule data", file=sys.stderr)
+    print("  5) Final  — renumber and finalize", file=sys.stderr)
+    print("  6) Complete — show completion message", file=sys.stderr)
+    choice = input("Enter number [1-6]: ").strip()
     args = argparse.Namespace()
     match choice:
         case "1":
@@ -470,6 +473,8 @@ def interactive_prompt() -> argparse.Namespace:
         case "4":
             args.mode = "pretty"
         case "5":
+            args.mode = "final"
+        case "6":
             args.mode = "complete"
         case _:
             print(f"Invalid choice: {choice}", file=sys.stderr)
@@ -769,15 +774,28 @@ def step_pretty() -> None:
         wb.close()
         sys.exit(1)
     B8CCE4_FILL = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
+    WHITE_FILL = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    OTP_FILL = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
     t1_start = 3
-    total = 0
+    b8_total = 0
+    white_total = 0
+    otp_total = 0
     for r in range(t1_start, sep_idx + 1):
         for c in range(3, 3 + data_count):
             cell = sm.get_cell(r, c)
-            if cell is None or cell.value is None or (isinstance(cell.value, str) and cell.value.strip() == ""):
+            if cell is None or cell.value is None:
                 sm.set_cell(r, c, fill=B8CCE4_FILL)
-                total += 1
-    print(f"{GREEN}→{NC} Filled {total} empty cells with #B8CCE4", file=sys.stderr)
+                b8_total += 1
+            elif isinstance(cell.value, str) and cell.value.strip() in ("", "В"):
+                sm.set_cell(r, c, fill=B8CCE4_FILL)
+                b8_total += 1
+            elif isinstance(cell.value, (int, float)):
+                sm.set_cell(r, c, fill=WHITE_FILL)
+                white_total += 1
+            elif isinstance(cell.value, str) and cell.value.strip() == "ОТП":
+                sm.set_cell(r, c, fill=OTP_FILL)
+                otp_total += 1
+    print(f"{GREEN}→{NC} Pretty: B8CCE4={b8_total} white={white_total} OTP={otp_total}", file=sys.stderr)
     sheet_name = "Pretty"
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
@@ -789,9 +807,43 @@ def step_pretty() -> None:
     wb.save(SCHEDULES_FILE)
     wb.close()
     print(f"{GREEN}→{NC} Pretty data written to sheet '{sheet_name}'.", file=sys.stderr)
+    ans = input("\nContinue with final? (y/N): ").strip().lower()
+    if ans == "y":
+        step_final()
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 5: Complete
+# STEP 5: Final (renumber)
+# ═══════════════════════════════════════════════════════════════
+
+def step_final() -> None:
+    wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
+    if "Pretty" in wb.sheetnames:
+        ws = wb["Pretty"]
+    else:
+        ws = wb.active
+    sm = SheetMapping(ws)
+    sep_idx = _find_sep_idx(ws)
+    if sep_idx is None:
+        print(f"{RED}Error:{NC} cannot find table separator", file=sys.stderr)
+        wb.close()
+        sys.exit(1)
+    sheet_name = "Final"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+    new_sep = _find_sep_idx(ws_new)
+    if new_sep is not None:
+        _renumber_column_a(ws_new, new_sep)
+    wb.save(SCHEDULES_FILE)
+    wb.close()
+    print(f"{GREEN}→{NC} Final sheet created with renumbered column A.", file=sys.stderr)
+    ans = input("\nContinue with complete? (y/N): ").strip().lower()
+    if ans == "y":
+        step_complete()
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 6: Complete
 # ═══════════════════════════════════════════════════════════════
 
 def step_complete() -> None:
@@ -822,12 +874,13 @@ def main() -> None:
         step_merge()
     elif ns.mode in ("pretty"):
         step_pretty()
-        step_complete()
+    elif ns.mode in ("final"):
+        step_final()
     elif ns.mode in ("complete"):
         step_complete()
     else:
         print(f"Unknown mode: {ns.mode}", file=sys.stderr)
-        print("  Valid modes: diff, clean, merge, pretty, complete", file=sys.stderr)
+        print("  Valid modes: diff, clean, merge, pretty, final, complete", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
