@@ -922,7 +922,7 @@ def step_pretty() -> None:
     for r in range(t1_start, sep_idx + 1):
         for c in range(3, 3 + data_count):
             cell = sm.get_cell(r, c)
-            if cell is not None and isinstance(cell.value, str) and cell.value.strip() == "ОТ":
+            if cell is not None and isinstance(cell.value, str) and cell.value.strip().upper() == "ОТ":
                 cell.value = "ОТП"
             if cell is not None and isinstance(cell.value, str) and cell.value.strip() == "В":
                 cell.value = ""
