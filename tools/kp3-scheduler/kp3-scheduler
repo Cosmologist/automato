@@ -771,6 +771,9 @@ def step_merge() -> None:
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 4: Update
+# ═══════════════════════════════════════════════════════════════
+
+def step_update() -> None:
     wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
     if len(wb.sheetnames) != 1:
         print(f"{RED}Error:{NC} update mode requires exactly one sheet", file=sys.stderr)
@@ -875,34 +878,33 @@ def step_merge() -> None:
             sm.set_cell(entry["row_num"], 3 + di, value=val)
         updated_count += 1
     print(f"{GREEN}→{NC} Updated: {updated_count}, Inserted: {inserted_count}", file=sys.stderr)
-    ws_first = wb.worksheets[0]
-    ws_first_name = ws_first.title
-    for sn in list(wb.sheetnames):
-        if sn != ws_first_name:
-            del wb[sn]
-    ws_first.delete_rows(1, ws_first.max_row or 1)
-    sm.render(ws_first)
-    new_sep = _find_sep_idx(ws_first)
+    sheet_name = "Update"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+    new_sep = _find_sep_idx(ws_new)
     if new_sep is not None:
-        _renumber_column_a(ws_first, new_sep)
+        _renumber_column_a(ws_new, new_sep)
     wb.save(SCHEDULES_FILE)
     wb.close()
-    print(f"{GREEN}→{NC} Update applied to sheet '{ws_first_name}'.", file=sys.stderr)
+    print(f"{GREEN}→{NC} Update data written to sheet '{sheet_name}'.", file=sys.stderr)
     ans = input("\nContinue with pretty? (y/N): ").strip().lower()
     if ans == "y":
         step_pretty()
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 5: Pretty
+# ═══════════════════════════════════════════════════════════════
+
 def step_pretty() -> None:
     wb = openpyxl.load_workbook(SCHEDULES_FILE, keep_vba=True)
-    if "Final" in wb.sheetnames:
-        wb["Final"].title = "Лист 2"
-    keep = "Лист 2" if "Лист 2" in wb.sheetnames else wb.sheetnames[0]
-    for sn in list(wb.sheetnames):
-        if sn != keep:
-            del wb[sn]
-    ws = wb.active
+    if "Merge" in wb.sheetnames:
+        ws = wb["Merge"]
+    elif "Update" in wb.sheetnames:
+        ws = wb["Update"]
+    else:
+        ws = wb.active
     sm = SheetMapping(ws)
     sep_idx = _find_sep_idx(ws)
     if sep_idx is None:
@@ -938,15 +940,22 @@ def step_pretty() -> None:
                 sm.set_cell(r, c, fill=OTP_FILL)
                 otp_total += 1
     print(f"{GREEN}→{NC} Pretty: B8CCE4={b8_total} white={white_total} OTP={otp_total}", file=sys.stderr)
-    first_sheet = wb.worksheets[0]
-    first_name = first_sheet.title
-    sm.render(first_sheet)
-    new_sep = _find_sep_idx(first_sheet)
+    sheet_name = "Pretty"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws_new = wb.create_sheet(sheet_name)
+    sm.render(ws_new)
+    new_sep = _find_sep_idx(ws_new)
     if new_sep is not None:
-        _renumber_column_a(first_sheet, new_sep)
+        _renumber_column_a(ws_new, new_sep)
+    wb.save(SCHEDULES_FILE)
+    for sn in list(wb.sheetnames):
+        if sn != sheet_name:
+            del wb[sn]
+    wb[sheet_name].title = "Лист"
     wb.save(SCHEDULES_FILE)
     wb.close()
-    print(f"{GREEN}→{NC} Pretty data written to sheet '{first_name}'.", file=sys.stderr)
+    print(f"{GREEN}→{NC} Pretty data written to sheet '{sheet_name}', renamed to 'Лист'.", file=sys.stderr)
     ans = input("\nContinue with complete? (y/N): ").strip().lower()
     if ans == "y":
         step_complete()
