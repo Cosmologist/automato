@@ -20,7 +20,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SCHEDULES_FILE = SCRIPT_DIR / "schedules.xlsx"
 EMPLOYEES_FILE = SCRIPT_DIR / "employees.docx"
 DEPARTS_DIR = SCRIPT_DIR / "departs"
-UPDATE_DIR = SCRIPT_DIR / "update"
+UPDATE_DIR = SCRIPT_DIR / "updates"
 FIO_ALT_FILE = SCRIPT_DIR / "fio-alternatives.txt"
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -41,7 +41,7 @@ Usage:
   {Path(sys.argv[0]).name} diff           — Compare schedules vs employees
   {Path(sys.argv[0]).name} clean          — Remove rows without pair in employees
   {Path(sys.argv[0]).name} merge          — Merge depart data into schedules
-  {Path(sys.argv[0]).name} update         — Update schedules from update/ files
+  {Path(sys.argv[0]).name} update         — Update schedules from updates/ files
   {Path(sys.argv[0]).name} pretty         — Style cells in schedule data
   {Path(sys.argv[0]).name} final          — Renumber and finalize
   {Path(sys.argv[0]).name} complete       — Show completion message
@@ -472,7 +472,7 @@ def interactive_prompt() -> argparse.Namespace:
     print("  1) Diff   — compare schedules vs employees", file=sys.stderr)
     print("  2) Clean  — remove rows without pair in employees", file=sys.stderr)
     print("  3) Merge  — merge depart data into schedules", file=sys.stderr)
-    print("  4) Update — update schedules from update/ files", file=sys.stderr)
+    print("  4) Update — update schedules from updates/ files", file=sys.stderr)
     print("  5) Pretty — style cells in schedule data", file=sys.stderr)
     print("  6) Final  — renumber and finalize", file=sys.stderr)
     print("  7) Complete — show completion message", file=sys.stderr)
@@ -798,16 +798,16 @@ def step_update() -> None:
     update_files = sorted(UPDATE_DIR.glob("*.xlsx"))
     update_files = [f for f in update_files if not f.name.startswith(".~lock.")]
     if not update_files:
-        print(f"{YELLOW}skip{NC} no .xlsx files in update/", file=sys.stderr)
+        print(f"{YELLOW}skip{NC} no .xlsx files in updates/", file=sys.stderr)
         wb.close()
         return
     update_employees: dict[str, list] = {}
     for filepath in update_files:
         employees = scan_depart_file(filepath, data_count)
         if not employees:
-            print(f"{YELLOW}skip{NC} update/{filepath.name} — no employees found")
+            print(f"{YELLOW}skip{NC} updates/{filepath.name} — no employees found")
             continue
-        print(f"{GREEN}→{NC} update/{filepath.name}: {len(employees)} employees")
+        print(f"{GREEN}→{NC} updates/{filepath.name}: {len(employees)} employees")
         for emp in employees:
             fk = fio_key(emp["fio"])
             if fk not in update_employees:
