@@ -420,6 +420,9 @@ def scan_depart_file(filepath: Path, data_count: int) -> list[dict]:
         data = []
         for c in range(fio_col + 1, data_end + 1):
             data.append(ws.cell(row=r, column=c).value)
+        non_none = [d for d in data if d is not None]
+        if non_none and all(str(d).strip().upper() == "НН" for d in non_none):
+            continue
         employees.append({"fio": cleaned, "data": data})
     wb.close()
     return employees
