@@ -5,40 +5,46 @@ The project contains various useful scripts, semantically structured, with CRUDL
 Use **English** for all code, comments, commit messages, and documentation.
 
 ## Preferred programming language
-Bash for simple tasks and Python for complex. 
+Python only.
 
-## Endpoints
+## Architecture
 
-### Repository
-- **`system`** - system tools (default system is Linux like Ubuntu or Debian). 
-- **`any domain`** - domain tools, like tools for specific app, web resource etc.
-- **`configure/`**, **`tools/`**, **`ec
-- **`examples`**- tails of legacy system. 
+### Endpoint
+An **endpoint** is a Python module at the end of a directory tree: `./[domain]/([subdomain]/)+<action>.py`. It must be executable and self-contained — the only allowed dependency is the base CLI class from `lib/cli.py`.
 
-### Filesyste. structure
-An **endpoint** is a leaf executable file in the project tree — the SINGLE script at the end of a branch that performs the actual work: `./[domain]/([subdomain]/)+<action>`.
+### Base class
+Every endpoint inherits from `lib.cli.CLI`. The base class provides:
+- Method-based command routing (each public method = one CLI command)
+- Automatic argument parsing from method signatures (type hints, defaults)
+- Help generation from docstrings (module → script help, method → command help)
+- JSON output of return values (pretty-printed with indentation)
 
-### Naming
-The endpoint script name MUST match its parent directory name (`system` do. ai. excluded from naming).
-If the directory name starts with an OS prefix (e.g. `linux-`, `debian-`, `ubuntu-`),
-that prefix is dropped from the script name. (`gnome-` is not an OS prefix.)
+### Default command
+A method marked with `@default` (or the only public method) runs when no arguments are given.
 
-### Requirements 
-Каждый endpoint — это один самостоятельный файл. 
-Для скриптов на python не подключать
-внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные. 
-
-### Shebang and Executable Permissions
-The script MUST have a correct shebang (`#!/bin/bash`, `#!/usr/bin/env python3`, etc.) and the executable bit MUST be set (`chmod +x`). This allows running the script directly as `./script.sh` without explicitly invoking an interpreter.
-
-### Input 
-Always match input arguments against the endpoint signature - throw an error if there is a mismatch.
+### Input
+Arguments are parsed from the method signature:
+- Parameters **without defaults** → positional CLI arguments
+- Parameters **with defaults** → `--name` optional CLI options
+- Type hints → type conversion (`str`, `int`, `float`, `bool`)
 
 ### Output
-Should be structured to json, except primitives responses like number, data, dtring etc. 
+Methods **return** data structures (dict, list, str, etc.) — they never print. The base class serialises the return value as pretty-printed JSON.
+
+### Help
+- Module docstring → script-level help text
+- Class docstring → additional description
+- Method docstring → command help text
+- Google-style `Args:` section → per-parameter descriptions in `--help`
+
+### Requirements
+Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
+
+### Shebang and Executable Permissions
+The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`). This allows running the script directly as `./script.py` without explicitly invoking an interpreter.
 
 ### Reuse
-Don't duplicate code—reuse existing and appropriate endpoints. Check the list of existing endpoints in ./REGISTRY.md before starting.
+Don't duplicate code. Reuse existing endpoints by importing their module and calling functions directly. Check the list of existing endpoints in ./REGISTRY.md before starting.
 
 ### Registry
-Maintain a list of existing endpoints in the REGISTRY.md file - add entries to it when creating new ones and changing existing ones. The format is one line - "name - short description". 
+Maintain a list of existing endpoints in the REGISTRY.md file — add entries when creating new ones and changing existing ones. Format: one line — `name — short description`.
