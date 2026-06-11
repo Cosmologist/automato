@@ -17,7 +17,10 @@ Use **English** for all code, comments, commit messages, and documentation.
 Если скрипту нужна сторонняя библиотека (`requests`, `pyyaml` и т.п.):
 - Не устанавливать её глобально.
 - Не создавать `requirements.txt` / `pyproject.toml`.
-- Использовать `uv run` с аргументом `--with`: `#!/usr/bin/env uv run --with requests --with pyyaml`
+- Использовать `uv run` и указывать зависимости в скрипте через inline-метаданные: `#!/usr/bin/env uv run`
+  # /// script
+  # dependencies = ["requests", "pyyaml"]
+  # ///
   Это позволяет выполнить скрипт с временно установленными зависимостями без изменения системы.
 
 ### `lib/infrastructure.py` — переиспользуемые утилиты
