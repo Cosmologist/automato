@@ -7,18 +7,36 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from lib.cli import CLI, default
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.cli import CLI, default as default_dec
 
 
 class Interface(CLI):
-    @default
+    @default_dec
     def all(self) -> list[dict]:
         """List all network interfaces."""
         return self._fetch_links()
 
-    @default
-    def show(self, iface: str) -> dict:
+    @default_dec
+    def default(self, detail: bool = False) -> str | dict:
+        """Show the default network interface.
+
+        Args:
+            detail: Show full interface details
+        """
+        result = self._exec(["ip", "route", "show", "default"])
+        lines = result.stdout.strip().splitlines()
+        if not lines:
+            raise RuntimeError("No default route found")
+        iface = lines[0].split()[4]
+
+        if detail:
+            return self.detail(iface)
+
+        return iface
+
+    @default_dec
+    def detail(self, iface: str) -> dict:
         """Show interface details.
 
         Args:

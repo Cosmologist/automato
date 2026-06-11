@@ -1,3 +1,3 @@
 # Registry
 
-- `system/network/interface` — List and inspect network interfaces
+- `system/network/interfaces` — List and inspect network interfaces
