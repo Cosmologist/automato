@@ -43,37 +43,7 @@ class Interface(CLI):
             iface: Interface name
         """
         result = self._exec(["ip", "-j", "addr", "show", iface])
-        link = self._fetch_links(iface)[0]
-        data = json.loads(result.stdout)[0]
-        groups: dict[str, list[dict]] = {}
-        for entry in data.get("addr_info", []):
-            family = entry.get("family", "")
-            if family == "inet":
-                key = "inet4"
-            elif family == "inet6":
-                scope = entry.get("scope", "")
-                if scope == "link":
-                    key = "inet6.local"
-                elif scope == "host":
-                    key = "inet6.static"
-                elif entry.get("noprefixroute"):
-                    key = "inet6.dynamic"
-                else:
-                    key = "inet6.static"
-            else:
-                continue
-            info: dict[str, object] = {
-                "local": entry.get("local"),
-                "prefixlen": entry.get("prefixlen"),
-                "scope": entry.get("scope"),
-            }
-            for f in ("protocol", "dynamic", "noprefixroute", "label", "broadcast"):
-                v = entry.get(f)
-                if v is not None:
-                    info[f] = v
-            groups.setdefault(key, []).append(info)
-        link["addr_info"] = groups
-        return link
+        return json.loads(result.stdout)[0]
 
     def _fetch_links(self, iface: str | None = None) -> list[dict]:
         cmd = ["ip", "-j", "link", "show"]
