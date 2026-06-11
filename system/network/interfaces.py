@@ -67,7 +67,7 @@ class Interface(CLI):
                 "prefixlen": entry.get("prefixlen"),
                 "scope": entry.get("scope"),
             }
-            for f in ("protocol", "dynamic", "noprefixroute"):
+            for f in ("protocol", "dynamic", "noprefixroute", "label", "broadcast"):
                 v = entry.get(f)
                 if v is not None:
                     info[f] = v
