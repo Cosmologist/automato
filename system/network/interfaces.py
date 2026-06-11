@@ -15,7 +15,8 @@ class Interface(CLI):
     @default_dec
     def all(self) -> list[dict]:
         """List all network interfaces."""
-        return self._fetch_links()
+        result = self._exec(["ip", "-j", "addr", "show"])
+        return json.loads(result.stdout)
 
     @default_dec
     def default(self, detail: bool = False) -> str | dict:
@@ -44,12 +45,6 @@ class Interface(CLI):
         """
         result = self._exec(["ip", "-j", "addr", "show", iface])
         return json.loads(result.stdout)[0]
-
-    def _fetch_links(self, iface: str | None = None) -> list[dict]:
-        cmd = ["ip", "-j", "link", "show"]
-        if iface:
-            cmd.append(iface)
-        return json.loads(self._exec(cmd).stdout)
 
 
 if __name__ == "__main__":
