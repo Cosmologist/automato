@@ -42,16 +42,35 @@ class Interface(CLI):
         Args:
             iface: Interface name
         """
-        data = self._fetch_links(iface)[0]
-        try:
-            result = self._exec(["ip", "-j", "addr", "show", iface])
-        except RuntimeError:
-            return data
-        addr_info = []
-        for entry in json.loads(result.stdout):
-            addr_info.extend(entry.get("addr_info", []))
-        data["addr_info"] = addr_info
-        return data
+        result = self._exec(["ip", "-j", "addr", "show", iface])
+        link = self._fetch_links(iface)[0]
+        data = json.loads(result.stdout)[0]
+        groups: dict[str, list[dict]] = {}
+        for entry in data.get("addr_info", []):
+            family = entry.get("family", "")
+            if family == "inet":
+                key = "inet4"
+            elif family == "inet6":
+                scope = entry.get("scope", "")
+                if scope == "link":
+                    key = "inet6.local"
+                elif scope == "host":
+                    key = "inet6.static"
+                elif entry.get("noprefixroute"):
+                    key = "inet6.dynamic"
+                else:
+                    key = "inet6.static"
+            else:
+                continue
+            groups.setdefault(key, []).append(
+                {
+                    "local": entry.get("local"),
+                    "prefixlen": entry.get("prefixlen"),
+                    "scope": entry.get("scope"),
+                }
+            )
+        link["addr_info"] = groups
+        return link
 
     def _fetch_links(self, iface: str | None = None) -> list[dict]:
         cmd = ["ip", "-j", "link", "show"]
