@@ -62,13 +62,16 @@ class Interface(CLI):
                     key = "inet6.static"
             else:
                 continue
-            groups.setdefault(key, []).append(
-                {
-                    "local": entry.get("local"),
-                    "prefixlen": entry.get("prefixlen"),
-                    "scope": entry.get("scope"),
-                }
-            )
+            info: dict[str, object] = {
+                "local": entry.get("local"),
+                "prefixlen": entry.get("prefixlen"),
+                "scope": entry.get("scope"),
+            }
+            for f in ("protocol", "dynamic", "noprefixroute"):
+                v = entry.get(f)
+                if v is not None:
+                    info[f] = v
+            groups.setdefault(key, []).append(info)
         link["addr_info"] = groups
         return link
 
