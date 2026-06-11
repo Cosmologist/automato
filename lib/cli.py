@@ -14,11 +14,27 @@ def default(func):
     return func
 
 
+def template(pattern=None):
+    if callable(pattern):
+        pattern._cli_template = True
+        return pattern
+
+    def decorator(func):
+        func._cli_template = pattern if pattern else True
+        return func
+
+    return decorator
+
+
 class CLI:
     @classmethod
     def run(cls):
         instance = cls()
         argv = sys.argv[1:]
+
+        instance._raw_mode = "--raw" in argv
+        argv = [a for a in argv if a != "--raw"]
+
         commands = instance._get_commands()
 
         if argv and argv[0] in ("--help", "-h"):
@@ -151,7 +167,42 @@ class CLI:
             return
 
         if result is not None:
+            self._output(result, method)
+
+    def _output(self, result, method):
+        if self._raw_mode:
             print(json.dumps(result, indent=2, default=str))
+            return
+
+        tmpl = getattr(method.__func__, "_cli_template", None)
+        if not tmpl:
+            print(json.dumps(result, indent=2, default=str))
+            return
+
+        if isinstance(result, str):
+            print(result)
+            return
+
+        class _Missing(dict):
+            def __missing__(self, k):
+                return ""
+
+        if isinstance(result, dict):
+            if tmpl is True:
+                if result:
+                    pad = max(len(k) for k in result) + 2
+                    for k, v in result.items():
+                        print(f"{k:{pad}}{v}")
+            else:
+                print(tmpl.format_map(_Missing(result)))
+        elif isinstance(result, list):
+            for item in result:
+                if isinstance(item, dict) and tmpl is not True:
+                    print(tmpl.format_map(_Missing(item)))
+                else:
+                    print(item)
+        else:
+            print(result)
 
     def _convert(self, value: str, target: type) -> Any:
         if target == bool:
@@ -193,7 +244,7 @@ class CLI:
             if getattr(m.__func__, "_cli_default", False)
         }
 
-        print(f"Usage: {prog} [command] [args...]", file=sys.stderr)
+        print(f"Usage: {prog} [--raw] [command] [args...]", file=sys.stderr)
         if desc_parts:
             print(file=sys.stderr)
             for d in desc_parts:
@@ -212,6 +263,9 @@ class CLI:
             print(
                 f"Run '{prog} <command> --help' for details.", file=sys.stderr
             )
+            print(file=sys.stderr)
+            print("Global options:", file=sys.stderr)
+            print("  --raw    Output raw JSON instead of template format", file=sys.stderr)
         sys.exit(0)
 
     def _command_help(self, method, positional, optional):
@@ -224,7 +278,7 @@ class CLI:
         for p in optional:
             parts.append(f"[--{p.name.replace('_', '-')}]")
 
-        print(f"Usage: {prog} {' '.join(parts)}", file=sys.stderr)
+        print(f"Usage: {prog} [--raw] {' '.join(parts)}", file=sys.stderr)
         print(file=sys.stderr)
         if method.__doc__:
             print(method.__doc__.strip(), file=sys.stderr)
@@ -248,6 +302,9 @@ class CLI:
                     file=sys.stderr,
                 )
             print(file=sys.stderr)
+        print("Global options:", file=sys.stderr)
+        print("  --raw    Output raw JSON instead of template format", file=sys.stderr)
+        print(file=sys.stderr)
         sys.exit(0)
 
     @staticmethod

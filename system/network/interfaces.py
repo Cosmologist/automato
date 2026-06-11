@@ -8,11 +8,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.cli import CLI, default as default_dec
+from lib.cli import CLI, default as default_dec, template
 
 
 class Interface(CLI):
     @default_dec
+    @template
     def read(
         self,
         iface: str = "",
