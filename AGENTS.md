@@ -23,7 +23,7 @@ The endpoint script name MUST match its parent directory name (`system` do. ai. 
 If the directory name starts with an OS prefix (e.g. `linux-`, `debian-`, `ubuntu-`),
 that prefix is dropped from the script name. (`gnome-` is not an OS prefix.)
 
-## Endpiint requirements 
+## Endpoint requirements 
 Каждый endpoint — это один самостоятельный файл. 
 **`configure/`** скриптов на python не подключать
 внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные. 
