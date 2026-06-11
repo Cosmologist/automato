@@ -4,6 +4,29 @@ The project contains various useful scripts.
 ## Language
 Use **English** for all code, comments, commit messages, and documentation.
 
+## Императивы (обязательные правила)
+
+### Язык по умолчанию — Python
+Скрипты писать на Python, если только задача не тривиальна (одна-две команды оболочки).
+Исключение: configure-скрипты, которые работают с системными конфигами — для них bash допустим.
+
+### Один файл = один скрипт
+Каждый endpoint — это один самостоятельный файл. Внешние зависимости не подключать через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` (см. ниже).
+
+### Управление зависимостями через `uv run`
+Если скрипту нужна сторонняя библиотека (`requests`, `pyyaml` и т.п.):
+- Не устанавливать её глобально.
+- Не создавать `requirements.txt` / `pyproject.toml`.
+- Использовать `uv run` с аргументом `--with`: `#!/usr/bin/env uv run --with requests --with pyyaml`
+  Это позволяет выполнить скрипт с временно установленными зависимостями без изменения системы.
+
+### `lib/infrastructure.py` — переиспользуемые утилиты
+В корне проекта существует `lib/infrastructure.py`. Перед написанием любого вспомогательного кода внутри скрипта агент ОБЯЗАН:
+1. Проверить, нет ли в `lib/infrastructure.py` уже готового функционала для задачи.
+2. Если функционал есть — использовать его.
+3. Если функционала нет, но он явно **переиспользуемый** (понадобится в других скриптах) — предлагать добавить его в `lib/infrastructure.py` (и только после согласования с пользователем).
+4. Если функционал уникален для конкретного скрипта — писать inline внутри скрипта.
+
 ## Repository
 - **`configure/`** — system/application config tweaks (remove packages, disable services, settings).
 - **`tools/`** — general-purpose utility scripts.
@@ -21,7 +44,7 @@ If the directory name starts with an OS prefix (e.g. `linux-`, `debian-`, `ubunt
 that prefix is dropped from the script name. (`gnome-` is not an OS prefix.)
 
 ## Preferred programming language
-Language: bash for small scripts, Python for complex logic/portability.
+Language: Python (см. императивы выше).
 
 ## Script Requirements
 Every script MUST implement all of the following:
