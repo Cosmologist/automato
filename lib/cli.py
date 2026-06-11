@@ -102,7 +102,7 @@ class CLI:
             pos_values.append(argv[i])
             i += 1
 
-        if len(pos_values) > len(positional):
+        if len(pos_values) > len(positional) + len(optional):
             self._error(f"Too many arguments for '{method.__name__}'")
 
         kwargs = {}
@@ -133,11 +133,16 @@ class CLI:
             else:
                 self._error(f"Missing required argument: '{p.name}'")
 
-        for p in optional:
-            if p.name not in kwargs:
-                kwargs[p.name] = p.default
-
-        call_args.update(kwargs)
+        overflow = pos_values[len(positional):]
+        for idx, p in enumerate(optional):
+            if idx < len(overflow):
+                call_args[p.name] = self._convert(
+                    overflow[idx], hints.get(p.name, str)
+                )
+            elif p.name in kwargs:
+                call_args[p.name] = kwargs[p.name]
+            else:
+                call_args[p.name] = p.default
 
         try:
             result = method(**call_args)
