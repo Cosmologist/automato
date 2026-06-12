@@ -30,6 +30,7 @@ When multiple methods are marked `@default`, the base class picks the best match
 Arguments are parsed from the method signature:
 - Parameters **without defaults** → positional CLI arguments
 - Parameters **with defaults** → `--name` optional CLI options
+- `*args` variadic parameter → collects remaining positional arguments after required ones
 - Type hints → type conversion (`str`, `int`, `float`, `bool`)
 
 ### Output
@@ -39,50 +40,101 @@ Methods **return** data structures (dict, list, str, etc.) — they never print.
 - **List of dicts** → aligned table (bold headers)
 - **Errors** → plain text to stderr (no JSON)
 
+Data lines contain only whitespace between values — no ANSI, no borders.
+
+Use `_output_fields` class attribute to document the output field order in the banner:
+
+```python
+class MyEndpoint(CLI):
+    _output_fields = ["name", "status", "mtu", "ip", "gateway"]
+```
+
+Example output (all fields):
+```
+name     lo
+status   UP
+mtu      65536
+ip       127.0.0.1/8
+gateway  None
+```
+
+Example output (single field `ip`):
+```
+ip  127.0.0.1/8
+```
+
+### `--tty` option
+Control output formatting:
+
+- `--tty` or `--tty=true` → force formatted output (table with ANSI)
+- `--tty=false` → force plain output (values only)
+- Not specified → auto-detect: formatted in terminal, plain when piped
+
+Examples:
+
+```bash
+./script.py eth0 --tty           # force formatted even when piped
+./script.py eth0 --tty=false     # force plain in terminal
+./script.py eth0                 # auto: plain when piped, formatted in terminal
+```
+
 ### Styling (stderr header)
-Every invocation prints a header to stderr with ANSI colors (when terminal supports it, respects `NO_COLOR`):
+Header with description + usage is shown on every invocation (except `--tty=false`). On success, header goes to stderr and data to stdout.
+
+ANSI colors when terminal supports it (respects `NO_COLOR`):
 
 | Element | ANSI | Example |
-|---|---|---|
-| Module description | `\033[36m` (cyan) | `# Show interface details` |
-| Command name in listing | `\033[1m` (bold) | `#   show    Description` |
-| Full usage line | `\033[2m` (dim) | `#   interface.py show <iface> [--args]` |
+|---|---|---|---|
+| Module description | `\033[36m` (cyan) | `# Show network interface info` |
+| Command name in listing | `\033[1;36m` (bold cyan) | `#   show    Description` |
+| Argument placeholder | `\033[32m` (green) | `<name>`, `[fields...]` |
+| Option flag in usage | `\033[33m` (yellow) | `--help`, `--tty` |
+| Full usage line | `\033[2m` (dim) | `#   interface show <iface> [--args]` |
 | Data keys/output | `\033[1m` (bold) | `name     eno1` |
+| Error message | `\033[31m` (red) | `Interface not found` |
+| Banner title | `\033[1m` (bold) | `[▸] interface — desc 1.0.0` |
 
-Single-command format:
+Single command (no name mentioned anywhere):
 ```
-# <module desc>
-#   <prog> <cmd> [args]
-```
-
-Multi-command format:
-```
-# <module desc>
-#
-#   <cmd>    <description>
-#            <prog> <cmd> [args]
-#   <cmd>    <description>
-#            <prog> <cmd> [args]
+[▸] <name> — <desc> <version>
+───────────────────────────────────────────────────
+Usage: <prog> <args> [--help] [--tty]
+───────────────────────────────────────────────────
 ```
 
-The current command's description is printed again before the output:
+Multi-command:
 ```
-# <current command description>
-<data>
+[▸] <name> — <desc> <version>
+───────────────────────────────────────────────────
+Usage: <prog> <command> [args...] [--help] [--tty]
+───────────────────────────────────────────────────
+
+  <cmd>    <description>
+           <prog> <cmd> [args]
 ```
+
+### Help
+- Single-command endpoint → `--help` shows banner + usage + ARGUMENTS + OPTIONS (no command name)
+- Multi-command endpoint → `--help` shows banner + usage + COMMANDS + OPTIONS
+- `--help` on explicit command (`show --help`) shows command-specific usage + ARGUMENTS + OPTIONS
+- `--help` is called on partial args to show available commands
 
 ### `_arg_labels` class attribute
 Override positional argument display in usage/help:
 
 ```python
 class MyEndpoint(CLI):
-    _arg_labels = {"iface": "iface|default"}
+    _arg_labels = {"name": "name|default", "fields": "fields"}
 ```
 
+### Versioning
+- Use semantic versioning with non-annotated git tags: `git tag <name>-<version>` (no `-a`)
+- Each subproject within automato has its own version tag: `system-network-interface-1.0.0`
+- Set `_version` and `_name` class attributes in each endpoint
+- Tag only before push
+
 ### Help
-- Module docstring → script-level help text
-- Class docstring → additional description
-- Method docstring → command help text
+- Module docstring → script-level help text (banner description)
 - Google-style `Args:` section → per-parameter descriptions in `--help`
 
 ### Requirements
@@ -90,6 +142,9 @@ class MyEndpoint(CLI):
 
 ### Shebang and Executable Permissions
 The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`). This allows running the script directly as `./script.py` without explicitly invoking an interpreter.
+
+### Missing arguments → help
+When required positional arguments are missing, the CLI automatically shows the error message followed by `--help` output for that command.
 
 ### Scope
 An endpoint does exactly what its name implies — no extra features, commands, or modes beyond the stated purpose. Resist feature creep.
