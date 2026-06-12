@@ -432,14 +432,19 @@ class CLI:
         cols = shutil.get_terminal_size().columns
         col_desc = 16
         opt_fmt = f"  {_S['yellow']}--{name}{_S['reset']}"
-        opt_len = len(name) + 4  # "--" + name
+        opt_len = len(name) + 4
         extra = col_desc - opt_len
         avail = cols - col_desc
-        desc_lines = textwrap.wrap(desc, width=max(20, avail))
-        print(f"{opt_fmt}{' ' * extra}{desc_lines[0]}", file=sys.stderr)
         pad = " " * (col_desc - 2)
-        for line in desc_lines[1:]:
-            print(f"  {pad}{line}", file=sys.stderr)
+        parts = desc.split("\n")
+        for i, part in enumerate(parts):
+            lines = textwrap.wrap(part, width=max(20, avail))
+            if i == 0:
+                print(f"{opt_fmt}{' ' * extra}{lines[0]}", file=sys.stderr)
+            else:
+                print(f"  {pad}{lines[0]}", file=sys.stderr)
+            for line in lines[1:]:
+                print(f"  {pad}{line}", file=sys.stderr)
 
     # -- help --
 
@@ -493,11 +498,8 @@ class CLI:
 
         print("OPTIONS:", file=sys.stderr)
         self._print_opt("help", "Show this help or command help")
-        tty_desc = "false — plain-values output for machines"
+        tty_desc = "false — plain-values output for machines\ntrue — decorated output for humans\nunset — automatic selection"
         self._print_opt("tty", tty_desc)
-        pad = " " * 14
-        print(f"  {pad}true — decorated output for humans", file=sys.stderr)
-        print(f"  {pad}unset — automatic selection", file=sys.stderr)
         if len(commands) == 1:
             _, method = commands[0]
             sig = inspect.signature(method)
@@ -560,11 +562,8 @@ class CLI:
 
         print("OPTIONS:", file=sys.stderr)
         self._print_opt("help", "Show this help or command help")
-        tty_desc = "false — plain-values output for machines"
+        tty_desc = "false — plain-values output for machines\ntrue — decorated output for humans\nunset — automatic selection"
         self._print_opt("tty", tty_desc)
-        pad = " " * 14
-        print(f"  {pad}true — decorated output for humans", file=sys.stderr)
-        print(f"  {pad}unset — automatic selection", file=sys.stderr)
         for p in optional:
             d = self._param_doc(method, p.name)
             desc = f"  {d}" if d else ""
