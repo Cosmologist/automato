@@ -15,7 +15,7 @@ VALID_FIELDS = {"name", "status", "mtu", "ip", "gateway"}
 
 
 class Interface(CLI):
-    _arg_labels = {"name": "name|default", "fields": "fields"}
+    _arg_labels = {"name": "name|default", "fields": "name|status|mtu|ip|gateway"}
     _output_fields = ["name", "status", "mtu", "ip", "gateway"]
     _version = "1.0.0"
 

@@ -136,7 +136,7 @@ class CLI:
                 continue
             label = labels.get(p.name, p.name)
             if p.kind == inspect.Parameter.VAR_POSITIONAL:
-                parts.append(f"[{_S['green']}{label}...{_S['reset']}]")
+                parts.append(f"[{_S['green']}{label}{_S['reset']}]")
             elif p.default is inspect.Parameter.empty:
                 parts.append(f"<{_S['green']}{label}{_S['reset']}>")
             elif isinstance(p.default, bool):
@@ -446,7 +446,7 @@ class CLI:
             if var_param:
                 print("FIELDS:", file=sys.stderr)
                 d = self._param_doc(method, var_param.name)
-                print(f"  <{_S['green']}{var_param.name}{_S['reset']}>  {d}", file=sys.stderr)
+                print(f"  {_S['green']}{labels.get(var_param.name, var_param.name)}{_S['reset']}  {d}", file=sys.stderr)
                 print(file=sys.stderr)
         else:
             print("COMMANDS:", file=sys.stderr)
@@ -483,7 +483,7 @@ class CLI:
         for p in positional:
             args.append(f"<{_S['green']}{labels.get(p.name, p.name)}{_S['reset']}>")
         if var_param:
-            args.append(f"[{_S['green']}{labels.get(var_param.name, var_param.name)}...{_S['reset']}]")
+            args.append(f"[{_S['green']}{labels.get(var_param.name, var_param.name)}{_S['reset']}]")
         for p in optional:
             args.append(f"[--{p.name.replace('_', '-')}]")
         commands = self._get_commands()
@@ -506,7 +506,7 @@ class CLI:
         if var_param:
             print("FIELDS:", file=sys.stderr)
             d = self._param_doc(method, var_param.name)
-            print(f"  <{_S['green']}{var_param.name}{_S['reset']}>  {d}", file=sys.stderr)
+            print(f"  {_S['green']}{labels.get(var_param.name, var_param.name)}{_S['reset']}  {d}", file=sys.stderr)
             print(file=sys.stderr)
 
         print("OPTIONS:", file=sys.stderr)
