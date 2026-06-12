@@ -428,6 +428,19 @@ class CLI:
         print(f"{_S['red']}{msg}{_S['reset']}", file=sys.stderr)
         sys.exit(1)
 
+    def _print_opt(self, name: str, desc: str):
+        cols = shutil.get_terminal_size().columns
+        col_desc = 16
+        opt_fmt = f"  {_S['yellow']}--{name}{_S['reset']}"
+        opt_len = len(name) + 4  # "--" + name
+        extra = col_desc - opt_len
+        avail = cols - col_desc
+        desc_lines = textwrap.wrap(desc, width=max(20, avail))
+        print(f"{opt_fmt}{' ' * extra}{desc_lines[0]}", file=sys.stderr)
+        pad = " " * (col_desc - 2)
+        for line in desc_lines[1:]:
+            print(f"  {pad}{line}", file=sys.stderr)
+
     # -- help --
 
     def _help(self, commands):
@@ -479,18 +492,12 @@ class CLI:
             print(file=sys.stderr)
 
         print("OPTIONS:", file=sys.stderr)
-        print(f"  {_S['yellow']}--help{_S['reset']}\tShow this help or command help", file=sys.stderr)
-        opt_fmt = f"  {_S['yellow']}--tty{_S['reset']}"
-        col_desc = 16
-        extra = col_desc - 7
-        tty_text = "false — plain-values output for machines; true — decorated output for humans; unset — automatic selection"
-        cols = shutil.get_terminal_size().columns
-        avail = cols - col_desc
-        desc_lines = textwrap.wrap(tty_text, width=max(20, avail))
-        print(f"{opt_fmt}{' ' * extra}{desc_lines[0]}", file=sys.stderr)
-        pad = " " * (col_desc - 2)
-        for line in desc_lines[1:]:
-            print(f"  {pad}{line}", file=sys.stderr)
+        self._print_opt("help", "Show this help or command help")
+        tty_desc = "false — plain-values output for machines"
+        self._print_opt("tty", tty_desc)
+        pad = " " * 14
+        print(f"  {pad}true — decorated output for humans", file=sys.stderr)
+        print(f"  {pad}unset — automatic selection", file=sys.stderr)
         if len(commands) == 1:
             _, method = commands[0]
             sig = inspect.signature(method)
@@ -552,18 +559,12 @@ class CLI:
             print(file=sys.stderr)
 
         print("OPTIONS:", file=sys.stderr)
-        print(f"  {_S['yellow']}--help{_S['reset']}\tShow this help or command help", file=sys.stderr)
-        opt_fmt = f"  {_S['yellow']}--tty{_S['reset']}"
-        col_desc = 16
-        extra = col_desc - 7
-        tty_text = "false — plain-values output for machines; true — decorated output for humans; unset — automatic selection"
-        cols = shutil.get_terminal_size().columns
-        avail = cols - col_desc
-        desc_lines = textwrap.wrap(tty_text, width=max(20, avail))
-        print(f"{opt_fmt}{' ' * extra}{desc_lines[0]}", file=sys.stderr)
-        pad = " " * (col_desc - 2)
-        for line in desc_lines[1:]:
-            print(f"  {pad}{line}", file=sys.stderr)
+        self._print_opt("help", "Show this help or command help")
+        tty_desc = "false — plain-values output for machines"
+        self._print_opt("tty", tty_desc)
+        pad = " " * 14
+        print(f"  {pad}true — decorated output for humans", file=sys.stderr)
+        print(f"  {pad}unset — automatic selection", file=sys.stderr)
         for p in optional:
             d = self._param_doc(method, p.name)
             desc = f"  {d}" if d else ""
