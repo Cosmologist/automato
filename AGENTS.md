@@ -35,9 +35,9 @@ Arguments are parsed from the method signature:
 ### Output
 Methods **return** data structures (dict, list, str, etc.) — they never print. The base class serialises the return value:
 
-- **With `@template` decorator** — formatted output (bare → aligned `key: value`, pattern → custom format)
-- **Without `@template`** — aligned table (TSV-style with bold headers)
-- Errors → plain text to stderr (no JSON)
+- **Dict** → aligned `key: value` (bold keys)
+- **List of dicts** → aligned table (bold headers)
+- **Errors** → plain text to stderr (no JSON)
 
 ### Styling (stderr header)
 Every invocation prints a header to stderr with ANSI colors (when terminal supports it, respects `NO_COLOR`):
@@ -70,16 +70,6 @@ The current command's description is printed again before the output:
 # <current command description>
 <data>
 ```
-
-### `@template` decorator
-Format method output with a custom template:
-
-```python
-@template                              # aligned key: value
-@template("{ifname:<16} {status}")     # custom format string
-```
-
-A method without `@template` gets aligned table output. Missing template keys render as empty string (no crash).
 
 ### `_arg_labels` class attribute
 Override positional argument display in usage/help:

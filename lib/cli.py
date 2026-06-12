@@ -31,17 +31,6 @@ def default(func):
     return func
 
 
-def template(pattern=None):
-    if callable(pattern):
-        pattern._cli_template = True
-        return pattern
-
-    def decorator(func):
-        func._cli_template = pattern if pattern else True
-        return func
-
-    return decorator
-
 
 class CLI:
     @classmethod
@@ -228,35 +217,18 @@ class CLI:
             self._output(result, method)
 
     def _output(self, result, method):
-        tmpl = getattr(method.__func__, "_cli_template", None)
-        if not tmpl:
-            self._output_tsv(result)
-            return
-
         if isinstance(result, str):
             print(result)
             return
 
-        class _Missing(dict):
-            def __missing__(self, k):
-                return ""
-
         if isinstance(result, dict):
-            if tmpl is True:
-                if result:
-                    pad = max(len(k) for k in result) + 2
-                    for k, v in result.items():
-                        print(f"{_S["bold"]}{k}{_S["reset"]}{' ' * (pad - len(k))}{v}")
-            else:
-                print(tmpl.format_map(_Missing(result)))
-        elif isinstance(result, list):
-            for item in result:
-                if isinstance(item, dict) and tmpl is not True:
-                    print(tmpl.format_map(_Missing(item)))
-                else:
-                    print(item)
-        else:
-            print(result)
+            if result:
+                pad = max(len(k) for k in result) + 2
+                for k, v in result.items():
+                    print(f"{_S["bold"]}{k}{_S["reset"]}{' ' * (pad - len(k))}{v}")
+            return
+
+        self._output_tsv(result)
 
     def _output_tsv(self, result):
         if isinstance(result, str):

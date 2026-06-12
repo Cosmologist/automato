@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.cli import CLI, default as default_dec, template
+from lib.cli import CLI, default as default_dec
 
 
 class Interface(CLI):
@@ -24,7 +24,6 @@ class Interface(CLI):
         return name
 
     @default_dec
-    @template
     def show(
         self,
         iface: str,
