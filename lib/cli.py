@@ -422,6 +422,13 @@ class CLI:
             raise RuntimeError(stderr or f"Command failed: {' '.join(cmd)}")
         return result
 
+    def _require_output(self, cmd: list[str], **kwargs) -> str:
+        result = self._exec(cmd, **kwargs)
+        out = result.stdout.strip()
+        if not out:
+            raise RuntimeError(f"`{' '.join(cmd)}` completed with no output")
+        return out
+
     def _error(self, msg: str, show_usage: bool = False):
         if show_usage:
             self._print_usage()
