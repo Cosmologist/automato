@@ -483,10 +483,14 @@ class CLI:
         opt_fmt = f"  {_S['yellow']}--tty{_S['reset']}"
         col_desc = 16
         extra = col_desc - 6
-        print(f"{opt_fmt}{' ' * extra}false — plain-values output for machines", file=sys.stderr)
+        tty_text = "false — plain-values output for machines; true — decorated output for humans; unset — automatic selection"
+        cols = shutil.get_terminal_size().columns
+        avail = cols - col_desc
+        desc_lines = textwrap.wrap(tty_text, width=max(20, avail))
+        print(f"{opt_fmt}{' ' * extra}{desc_lines[0]}", file=sys.stderr)
         pad = " " * (col_desc - 2)
-        print(f"  {pad}true — decorated output for humans", file=sys.stderr)
-        print(f"  {pad}unset — automatic selection", file=sys.stderr)
+        for line in desc_lines[1:]:
+            print(f"  {pad}{line}", file=sys.stderr)
         if len(commands) == 1:
             _, method = commands[0]
             sig = inspect.signature(method)
@@ -552,10 +556,14 @@ class CLI:
         opt_fmt = f"  {_S['yellow']}--tty{_S['reset']}"
         col_desc = 16
         extra = col_desc - 6
-        print(f"{opt_fmt}{' ' * extra}false — plain-values output for machines", file=sys.stderr)
+        tty_text = "false — plain-values output for machines; true — decorated output for humans; unset — automatic selection"
+        cols = shutil.get_terminal_size().columns
+        avail = cols - col_desc
+        desc_lines = textwrap.wrap(tty_text, width=max(20, avail))
+        print(f"{opt_fmt}{' ' * extra}{desc_lines[0]}", file=sys.stderr)
         pad = " " * (col_desc - 2)
-        print(f"  {pad}true — decorated output for humans", file=sys.stderr)
-        print(f"  {pad}unset — automatic selection", file=sys.stderr)
+        for line in desc_lines[1:]:
+            print(f"  {pad}{line}", file=sys.stderr)
         for p in optional:
             d = self._param_doc(method, p.name)
             desc = f"  {d}" if d else ""
