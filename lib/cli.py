@@ -109,13 +109,29 @@ class CLI:
         desc = module.__doc__.strip() if module and module.__doc__ else ""
 
         print(f"# {desc}", file=sys.stderr)
-        for name, method in self._get_commands():
+
+        commands = self._get_commands()
+
+        if len(commands) == 1:
+            name, method = commands[0]
             args = " ".join(
                 f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
                 for p in inspect.signature(method).parameters.values()
                 if p.name != "self"
             )
-            print(f"# Usage: {prog} {name} {args}", file=sys.stderr)
+            print(f"# Usage: {prog} {name} {args}".rstrip(), file=sys.stderr)
+        else:
+            print("# Usage:", file=sys.stderr)
+            print("#", file=sys.stderr)
+            for name, method in commands:
+                doc = method.__doc__.strip().split("\n")[0] if method.__doc__ else ""
+                args = " ".join(
+                    f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
+                    for p in inspect.signature(method).parameters.values()
+                    if p.name != "self"
+                )
+                print(f"#   {doc}", file=sys.stderr)
+                print(f"#   {prog} {name} {args}".rstrip(), file=sys.stderr)
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
