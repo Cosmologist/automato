@@ -46,6 +46,7 @@ class CLI:
             return
 
         if not argv:
+            instance._print_header()
             instance._run_best_default(commands, argv)
             return
 
@@ -192,7 +193,6 @@ class CLI:
                     pos_values[idx], hints.get(p.name, str)
                 )
             else:
-                self._print_header()
                 self._error(f"Missing required argument: '{p.name}'")
 
         overflow = pos_values[len(positional):]
