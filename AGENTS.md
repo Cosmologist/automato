@@ -18,8 +18,11 @@ Every endpoint inherits from `lib.cli.CLI`. The base class provides:
 - Automatic argument parsing from method signatures (type hints, defaults)
 - Help generation from docstrings (module → script help, method → command help)
 - `_exec(cmd, **kwargs)` — wrapper around `subprocess.run` with error handling (raises `RuntimeError` on non-zero exit, default `capture_output=True, text=True`)
+- `_require_output(cmd, **kwargs)` — like `_exec` but also checks that stdout is non-empty, returns stripped output string
+- `_error(msg, show_usage=False)` — prints error and exits
+- `_print_opt(name, desc)` — prints a `--name` option with description aligned at column 16 (handles `\n` multipart descriptions and per-terminal-width wrapping)
 
-Use `self._exec(...)` instead of raw `subprocess.run(...)` to avoid duplicating error handling.
+Use these helpers instead of raw `subprocess.run(...)` or manual `print` to avoid duplicating error handling and formatting logic.
 
 ### Default command
 A method marked with `@default` (or the only public method) runs when no arguments are given.
@@ -140,7 +143,17 @@ from typing import Literal
 def show(self, name: str, *fields: Literal["a", "b", "c"]) -> dict: ...
 ```
 
-Usage shows `[<fields>...]`, help shows the choices in the FIELDS section.
+Usage shows `[<fields>...]`, help shows the choices in the FIELDS section. Derive the default set from the Literal at runtime to avoid duplication:
+
+```python
+from typing import Literal, get_type_hints
+from lib.cli import _literal_choices
+
+def show(self, name: str, *fields: Literal["a", "b", "c"]) -> dict:
+    hints = get_type_hints(self.show)
+    choices = _literal_choices(hints.get("fields"))
+    requested = set(fields) if fields else set(choices)
+```
 
 ### Versioning
 - Use semantic versioning with non-annotated git tags: `git tag <name>-<version>` (no `-a`)
