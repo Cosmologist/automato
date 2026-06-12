@@ -17,11 +17,8 @@ class Interface(CLI):
 
     def _resolve_iface(self, name: str) -> str:
         if name == "default":
-            result = self._exec(["ip", "route", "show", "default"])
-            lines = result.stdout.strip().splitlines()
-            if not lines:
-                raise RuntimeError("No default route found")
-            return lines[0].split()[4]
+            output = self._require_output(["ip", "route", "show", "default"])
+            return output.splitlines()[0].split()[4]
         return name
 
     @default_dec
@@ -57,8 +54,8 @@ class Interface(CLI):
             if "ip" in requested:
                 out["ip"] = f"{inet4[0]['local']}/{inet4[0]['prefixlen']}"
             if "gateway" in requested:
-                gw = self._exec(["ip", "route", "show", "default", "dev", resolved])
-                gw_parts = gw.stdout.strip().split()
+                gw_out = self._require_output(["ip", "route", "show", "default", "dev", resolved])
+                gw_parts = gw_out.split()
                 out["gateway"] = gw_parts[2] if len(gw_parts) >= 3 else None
         return out
 
