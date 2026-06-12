@@ -115,10 +115,28 @@ class CLI:
 
     # -- execution --
 
+    @staticmethod
+    def _usage_args(method):
+        parts = []
+        for p in inspect.signature(method).parameters.values():
+            if p.name == "self":
+                continue
+            if p.default is inspect.Parameter.empty:
+                parts.append(f"<{p.name}>")
+            elif isinstance(p.default, bool):
+                parts.append(f"[--{p.name.replace('_', '-')}]")
+            else:
+                parts.append(f"[--{p.name.replace('_', '-')}={p.default}]")
+        return " ".join(parts)
+
+    @staticmethod
+    def _doc_first(method):
+        return method.__doc__.strip().split("\n")[0].rstrip(".") if method.__doc__ else ""
+
     def _print_header(self):
         module = sys.modules.get(self.__class__.__module__)
         prog = Path(module.__file__).name if module else sys.argv[0]
-        desc = module.__doc__.strip() if module and module.__doc__ else ""
+        desc = module.__doc__.strip().rstrip(".") if module and module.__doc__ else ""
 
         print(f"# {desc}", file=sys.stderr)
 
@@ -126,25 +144,15 @@ class CLI:
 
         if len(commands) == 1:
             name, method = commands[0]
-            args = " ".join(
-                f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
-                for p in inspect.signature(method).parameters.values()
-                if p.name != "self"
-            )
-            print(f"# {_DIM}Usage: {prog} {name} {args}{_RESET}".rstrip(), file=sys.stderr)
+            print(f"# {_DIM}Usage: {prog} {name} {self._usage_args(method)}{_RESET}".rstrip(), file=sys.stderr)
         else:
             print("#", file=sys.stderr)
             for name, method in commands:
-                doc = method.__doc__.strip().split("\n")[0] if method.__doc__ else ""
-                args = " ".join(
-                    f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
-                    for p in inspect.signature(method).parameters.values()
-                    if p.name != "self"
-                )
-                usage = f"{prog} {name} {args}".rstrip()
-                print(f"# {doc}", file=sys.stderr)
+                usage = f"{prog} {name} {self._usage_args(method)}".rstrip()
+                print(f"# {self._doc_first(method)}", file=sys.stderr)
                 for line in textwrap.wrap(usage, width=72):
                     print(f"# {_DIM}{line}{_RESET}", file=sys.stderr)
+
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
@@ -158,9 +166,8 @@ class CLI:
             self._command_help(method, positional, optional)
             return
 
-        doc = method.__doc__.strip().split("\n")[0] if method.__doc__ else ""
         print("#", file=sys.stderr)
-        print(f"# {doc}", file=sys.stderr)
+        print(f"# {self._doc_first(method)}", file=sys.stderr)
 
         pos_values = []
         i = 0
