@@ -234,7 +234,7 @@ class CLI:
 
         tmpl = getattr(method.__func__, "_cli_template", None)
         if not tmpl:
-            print(json.dumps(result, indent=2, default=str))
+            self._output_tsv(result)
             return
 
         if isinstance(result, str):
@@ -262,6 +262,31 @@ class CLI:
         else:
             print(result)
 
+    def _output_tsv(self, result):
+        if isinstance(result, str):
+            print(result)
+            return
+
+        if isinstance(result, dict):
+            print("\t".join(map(str, result.keys())))
+            print("\t".join(str(v) if v is not None else "" for v in result.values()))
+            return
+
+        if isinstance(result, list):
+            if not result:
+                return
+            if isinstance(result[0], dict):
+                keys = list(dict.fromkeys(k for d in result for k in d))
+                print("\t".join(keys))
+                for d in result:
+                    print("\t".join(str(d.get(k, "")) if d.get(k) is not None else "" for k in keys))
+            else:
+                for item in result:
+                    print(item)
+            return
+
+        print(result)
+
     def _convert(self, value: str, target: type) -> Any:
         if target == bool:
             return True
@@ -281,7 +306,7 @@ class CLI:
         return result
 
     def _error(self, msg: str):
-        print(json.dumps({"error": msg}))
+        print(msg, file=sys.stderr)
         sys.exit(1)
 
     # -- help --
