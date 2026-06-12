@@ -45,9 +45,6 @@ class CLI:
         instance = cls()
         argv = sys.argv[1:]
 
-        instance._raw_mode = "--raw" in argv
-        argv = [a for a in argv if a != "--raw"]
-
         instance._print_header()
 
         commands = instance._get_commands()
@@ -228,10 +225,6 @@ class CLI:
             self._output(result, method)
 
     def _output(self, result, method):
-        if self._raw_mode:
-            print(json.dumps(result, indent=2, default=str))
-            return
-
         tmpl = getattr(method.__func__, "_cli_template", None)
         if not tmpl:
             self._output_tsv(result)
@@ -327,7 +320,7 @@ class CLI:
             if getattr(m.__func__, "_cli_default", False)
         }
 
-        print(f"Usage: {prog} [--raw] [command] [args...]", file=sys.stderr)
+        print(f"Usage: {prog} [command] [args...]", file=sys.stderr)
         if desc_parts:
             print(file=sys.stderr)
             for d in desc_parts:
@@ -346,9 +339,6 @@ class CLI:
             print(
                 f"Run '{prog} <command> --help' for details.", file=sys.stderr
             )
-            print(file=sys.stderr)
-            print("Global options:", file=sys.stderr)
-            print("  --raw    Output raw JSON instead of template format", file=sys.stderr)
         sys.exit(0)
 
     def _command_help(self, method, positional, optional):
@@ -362,7 +352,7 @@ class CLI:
         for p in optional:
             parts.append(f"[--{p.name.replace('_', '-')}]")
 
-        print(f"Usage: {prog} [--raw] {' '.join(parts)}", file=sys.stderr)
+        print(f"Usage: {prog} {' '.join(parts)}", file=sys.stderr)
         print(file=sys.stderr)
         if method.__doc__:
             print(method.__doc__.strip(), file=sys.stderr)
@@ -386,9 +376,6 @@ class CLI:
                     file=sys.stderr,
                 )
             print(file=sys.stderr)
-        print("Global options:", file=sys.stderr)
-        print("  --raw    Output raw JSON instead of template format", file=sys.stderr)
-        print(file=sys.stderr)
         sys.exit(0)
 
     @staticmethod

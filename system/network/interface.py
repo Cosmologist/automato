@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Show network interface details"""
+"""Show network interface details from ip addr show"""
 
 from __future__ import annotations
 
