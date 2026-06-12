@@ -46,7 +46,6 @@ def default(func):
 
 class CLI:
     _arg_labels: dict[str, str] = {}
-    _output_fields: list[str] = []
     _version: str = ""
     _name: str = ""
     _icon: str = "▸"

@@ -14,7 +14,6 @@ from lib.cli import CLI, default as default_dec
 
 class Interface(CLI):
     _arg_labels = {"name": "name|default"}
-    _output_fields = ["name", "status", "mtu", "ip", "gateway"]
     _version = "1.0.0"
 
     def _resolve_iface(self, name: str) -> str:
