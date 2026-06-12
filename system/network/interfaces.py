@@ -12,6 +12,8 @@ from lib.cli import CLI, default as default_dec, template
 
 
 class Interface(CLI):
+    _arg_labels = {"iface": "iface|default"}
+
     def _resolve_iface(self, name: str) -> str:
         if name == "default":
             result = self._exec(["ip", "route", "show", "default"])

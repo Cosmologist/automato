@@ -115,14 +115,15 @@ class CLI:
 
     # -- execution --
 
-    @staticmethod
-    def _usage_args(method):
+    def _usage_args(self, method):
+        labels = getattr(self.__class__, "_arg_labels", {})
         parts = []
         for p in inspect.signature(method).parameters.values():
             if p.name == "self":
                 continue
+            label = labels.get(p.name, p.name)
             if p.default is inspect.Parameter.empty:
-                parts.append(f"<{p.name}>")
+                parts.append(f"<{label}>")
             elif isinstance(p.default, bool):
                 parts.append(f"[--{p.name.replace('_', '-')}]")
             else:
@@ -329,9 +330,10 @@ class CLI:
         module = sys.modules.get(self.__class__.__module__)
         prog = module.__file__ if module else sys.argv[0]
 
+        labels = getattr(self.__class__, "_arg_labels", {})
         parts = [method.__name__]
         for p in positional:
-            parts.append(f"<{p.name}>")
+            parts.append(f"<{labels.get(p.name, p.name)}>")
         for p in optional:
             parts.append(f"[--{p.name.replace('_', '-')}]")
 
