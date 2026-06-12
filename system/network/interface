@@ -6,16 +6,14 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.cli import CLI, default as default_dec
 
 
-VALID_FIELDS = {"name", "status", "mtu", "ip", "gateway"}
-
-
 class Interface(CLI):
-    _arg_labels = {"name": "name|default", "fields": "name|status|mtu|ip|gateway"}
+    _arg_labels = {"name": "name|default"}
     _output_fields = ["name", "status", "mtu", "ip", "gateway"]
     _version = "1.0.0"
 
@@ -29,17 +27,14 @@ class Interface(CLI):
         return name
 
     @default_dec
-    def show(self, name: str, *fields: str) -> dict:
+    def show(self, name: str, *fields: Literal["name", "status", "mtu", "ip", "gateway"]) -> dict:
         """Show interface details
 
         Args:
             name: Interface name or "default"
-            fields: Fields to show (name, status, mtu, ip, gateway). Show all if empty.
+            fields: Fields to show
         """
-        requested = set(fields) if fields else VALID_FIELDS
-        bad = requested - VALID_FIELDS
-        if bad:
-            raise RuntimeError(f"Unknown field(s): {', '.join(sorted(bad))}")
+        requested = set(fields) if fields else {"name", "status", "mtu", "ip", "gateway"}
 
         resolved = self._resolve_iface(name)
         data = self._exec(["ip", "-j", "addr", "show", resolved])

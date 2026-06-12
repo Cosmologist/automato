@@ -9,7 +9,16 @@ import shutil
 import subprocess
 import sys
 import textwrap
-from typing import Any, get_type_hints
+from typing import Any, Literal, get_args, get_origin, get_type_hints
+
+
+def _literal_choices(hint):
+    if hint is None:
+        return None
+    origin = get_origin(hint)
+    if origin is Literal:
+        return get_args(hint)
+    return None
 
 
 def _ansi():
@@ -130,11 +139,15 @@ class CLI:
 
     def _usage_args(self, method):
         labels = getattr(self.__class__, "_arg_labels", {})
+        hints = get_type_hints(method)
         parts = []
         for p in inspect.signature(method).parameters.values():
             if p.name == "self":
                 continue
             label = labels.get(p.name, p.name)
+            choices = _literal_choices(hints.get(p.name))
+            if choices:
+                label = "|".join(str(c) for c in choices)
             if p.kind == inspect.Parameter.VAR_POSITIONAL:
                 parts.append(f"[{_S['green']}{label}{_S['reset']}]")
             elif p.default is inspect.Parameter.empty:
@@ -306,7 +319,10 @@ class CLI:
         overflow = pos_values[len(positional):]
         h_var = hints.get(var_param.name, str) if var_param else None
         if var_param:
+            choices = _literal_choices(h_var)
             for v in overflow:
+                if choices and v not in choices:
+                    self._error(f"Unknown field: '{v}'", show_usage=True)
                 pos_args.append(self._convert(v, h_var))
         else:
             kw_args = {}
@@ -431,6 +447,7 @@ class CLI:
         if len(commands) == 1:
             _, method = commands[0]
             labels = getattr(self.__class__, "_arg_labels", {})
+            hints = get_type_hints(method)
 
             sig = inspect.signature(method)
             positional = [p for p in sig.parameters.values() if p.name != "self" and p.default is inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
@@ -441,12 +458,20 @@ class CLI:
                 print("ARGUMENTS:", file=sys.stderr)
                 for p in positional:
                     d = self._param_doc(method, p.name)
-                    print(f"  {_S['green']}{labels.get(p.name, p.name)}{_S['reset']}{'  ' + d if d else ''}", file=sys.stderr)
+                    label = labels.get(p.name, p.name)
+                    choices = _literal_choices(hints.get(p.name))
+                    if choices:
+                        label = "|".join(str(c) for c in choices)
+                    print(f"  {_S['green']}{label}{_S['reset']}{'  ' + d if d else ''}", file=sys.stderr)
                 print(file=sys.stderr)
             if var_param:
                 print("FIELDS:", file=sys.stderr)
                 d = self._param_doc(method, var_param.name)
-                print(f"  {_S['green']}{labels.get(var_param.name, var_param.name)}{_S['reset']}  {d}", file=sys.stderr)
+                label = labels.get(var_param.name, var_param.name)
+                choices = _literal_choices(hints.get(var_param.name))
+                if choices:
+                    label = "|".join(str(c) for c in choices)
+                print(f"  {_S['green']}{label}{_S['reset']}  {d}", file=sys.stderr)
                 print(file=sys.stderr)
         else:
             print("COMMANDS:", file=sys.stderr)
@@ -478,12 +503,21 @@ class CLI:
             sys.exit(0)
 
         labels = getattr(self.__class__, "_arg_labels", {})
+        hints = get_type_hints(method)
         prog = self._prog_name()
         args = []
         for p in positional:
-            args.append(f"<{_S['green']}{labels.get(p.name, p.name)}{_S['reset']}>")
+            label = labels.get(p.name, p.name)
+            choices = _literal_choices(hints.get(p.name))
+            if choices:
+                label = "|".join(str(c) for c in choices)
+            args.append(f"<{_S['green']}{label}{_S['reset']}>")
         if var_param:
-            args.append(f"[{_S['green']}{labels.get(var_param.name, var_param.name)}{_S['reset']}]")
+            label = labels.get(var_param.name, var_param.name)
+            choices = _literal_choices(hints.get(var_param.name))
+            if choices:
+                label = "|".join(str(c) for c in choices)
+            args.append(f"[{_S['green']}{label}{_S['reset']}]")
         for p in optional:
             args.append(f"[--{p.name.replace('_', '-')}]")
         commands = self._get_commands()
@@ -501,12 +535,20 @@ class CLI:
             print("ARGUMENTS:", file=sys.stderr)
             for p in positional:
                 d = self._param_doc(method, p.name)
-                print(f"  {_S['green']}{labels.get(p.name, p.name)}{_S['reset']}{'  ' + d if d else ''}", file=sys.stderr)
+                label = labels.get(p.name, p.name)
+                choices = _literal_choices(hints.get(p.name))
+                if choices:
+                    label = "|".join(str(c) for c in choices)
+                print(f"  {_S['green']}{label}{_S['reset']}{'  ' + d if d else ''}", file=sys.stderr)
             print(file=sys.stderr)
         if var_param:
             print("FIELDS:", file=sys.stderr)
             d = self._param_doc(method, var_param.name)
-            print(f"  {_S['green']}{labels.get(var_param.name, var_param.name)}{_S['reset']}  {d}", file=sys.stderr)
+            label = labels.get(var_param.name, var_param.name)
+            choices = _literal_choices(hints.get(var_param.name))
+            if choices:
+                label = "|".join(str(c) for c in choices)
+            print(f"  {_S['green']}{label}{_S['reset']}  {d}", file=sys.stderr)
             print(file=sys.stderr)
 
         print("OPTIONS:", file=sys.stderr)
