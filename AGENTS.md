@@ -42,14 +42,7 @@ Methods **return** data structures (dict, list, str, etc.) — they never print.
 
 Data lines contain only whitespace between values — no ANSI, no borders.
 
-Use `_output_fields` class attribute to document the output field order in the banner:
-
-```python
-class MyEndpoint(CLI):
-    _output_fields = ["name", "status", "mtu", "ip", "gateway"]
-```
-
-Example output (all fields):
+Example output:
 ```
 name     lo
 status   UP
@@ -58,17 +51,14 @@ ip       127.0.0.1/8
 gateway  None
 ```
 
-Example output (single field `ip`):
-```
-ip  127.0.0.1/8
-```
-
 ### `--tty` option
 Control output formatting:
 
 - `--tty` or `--tty=true` → force formatted output (table with ANSI)
-- `--tty=false` → force plain output (values only)
+- `--tty=false` or `--tty false` → force plain output (values only)
 - Not specified → auto-detect: formatted in terminal, plain when piped
+
+In plain mode (`--tty=false`), dict values are space-separated on one line.
 
 Examples:
 
@@ -79,7 +69,7 @@ Examples:
 ```
 
 ### Styling (stderr header)
-Header with description + usage is shown on every invocation (except `--tty=false`). On success, header goes to stderr and data to stdout.
+Header with banner title is shown on every invocation (except `--tty=false`). Usage line only shown on error or `--help`. On success, header goes to stderr and data to stdout.
 
 ANSI colors when terminal supports it (respects `NO_COLOR`):
 
@@ -87,7 +77,7 @@ ANSI colors when terminal supports it (respects `NO_COLOR`):
 |---|---|---|---|
 | Module description | `\033[36m` (cyan) | `# Show network interface info` |
 | Command name in listing | `\033[1;36m` (bold cyan) | `#   show    Description` |
-| Argument placeholder | `\033[32m` (green) | `<name>`, `[fields...]` |
+| Argument placeholder | `\033[32m` (green) | `<name>`, `[<fields>...]` |
 | Option flag in usage | `\033[33m` (yellow) | `--help`, `--tty` |
 | Full usage line | `\033[2m` (dim) | `#   interface show <iface> [--args]` |
 | Data keys/output | `\033[1m` (bold) | `name     eno1` |
@@ -98,7 +88,7 @@ Single command (no name mentioned anywhere):
 ```
 [▸] <name> — <desc> <version>
 ───────────────────────────────────────────────────
-Usage: <prog> <args> [--help] [--tty]
+Usage: <prog> <name> [<args>...] [--help] [--tty]
 ───────────────────────────────────────────────────
 ```
 
@@ -110,10 +100,12 @@ Usage: <prog> <command> [args...] [--help] [--tty]
 ───────────────────────────────────────────────────
 
   <cmd>    <description>
-           <prog> <cmd> [args]
+           <prog> <cmd> [<args>...]
 ```
 
 ### Help
+- Module docstring → script-level help text (banner description)
+- Google-style `Args:` section → per-parameter descriptions in `--help`
 - Single-command endpoint → `--help` shows banner + usage + ARGUMENTS + OPTIONS (no command name)
 - Multi-command endpoint → `--help` shows banner + usage + COMMANDS + OPTIONS
 - `--help` on explicit command (`show --help`) shows command-specific usage + ARGUMENTS + OPTIONS
@@ -127,15 +119,22 @@ class MyEndpoint(CLI):
     _arg_labels = {"name": "name|default", "fields": "fields"}
 ```
 
+### Variadic args with Literal
+Use `typing.Literal` to document valid values for variadic arguments. The base class extracts choices automatically for display and validation:
+
+```python
+from typing import Literal
+
+def show(self, name: str, *fields: Literal["a", "b", "c"]) -> dict: ...
+```
+
+Usage shows `[<fields>...]`, help shows the choices in the FIELDS section.
+
 ### Versioning
 - Use semantic versioning with non-annotated git tags: `git tag <name>-<version>` (no `-a`)
 - Each subproject within automato has its own version tag: `system-network-interface-1.0.0`
 - Set `_version` and `_name` class attributes in each endpoint
 - Tag only before push
-
-### Help
-- Module docstring → script-level help text (banner description)
-- Google-style `Args:` section → per-parameter descriptions in `--help`
 
 ### Requirements
 Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
@@ -144,7 +143,7 @@ class MyEndpoint(CLI):
 The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`). This allows running the script directly as `./script.py` without explicitly invoking an interpreter.
 
 ### Missing arguments → help
-When required positional arguments are missing, the CLI automatically shows the error message followed by `--help` output for that command.
+When required positional arguments are missing, the CLI shows the error followed by usage.
 
 ### Scope
 An endpoint does exactly what its name implies — no extra features, commands, or modes beyond the stated purpose. Resist feature creep.
