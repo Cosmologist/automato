@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import textwrap
 from typing import Any, get_type_hints
 
 
@@ -121,7 +122,6 @@ class CLI:
             )
             print(f"# Usage: {prog} {name} {args}".rstrip(), file=sys.stderr)
         else:
-            print("# Usage:", file=sys.stderr)
             print("#", file=sys.stderr)
             for name, method in commands:
                 doc = method.__doc__.strip().split("\n")[0] if method.__doc__ else ""
@@ -130,8 +130,12 @@ class CLI:
                     for p in inspect.signature(method).parameters.values()
                     if p.name != "self"
                 )
-                print(f"#   {doc}", file=sys.stderr)
-                print(f"#   {prog} {name} {args}".rstrip(), file=sys.stderr)
+                usage = f"{prog} {name} {args}".rstrip()
+                print(f"# {name} — {doc}", file=sys.stderr)
+                print(
+                    textwrap.fill(usage, width=72, initial_indent="#     ", subsequent_indent="#     "),
+                    file=sys.stderr,
+                )
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
