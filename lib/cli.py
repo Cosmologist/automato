@@ -480,7 +480,7 @@ class CLI:
 
         print("OPTIONS:", file=sys.stderr)
         print(f"  {_S['yellow']}--help{_S['reset']}\tShow this help or command help", file=sys.stderr)
-        print(f"  {_S['yellow']}--tty{_S['reset']}\t\tFormatted table output (auto: terminal only)", file=sys.stderr)
+        print(f"  {_S['yellow']}--tty{_S['reset']}\t\tPlain values (false), formatted table (true), auto if unset", file=sys.stderr)
         if len(commands) == 1:
             _, method = commands[0]
             sig = inspect.signature(method)
@@ -543,7 +543,7 @@ class CLI:
 
         print("OPTIONS:", file=sys.stderr)
         print(f"  {_S['yellow']}--help{_S['reset']}\tShow this help or command help", file=sys.stderr)
-        print(f"  {_S['yellow']}--tty{_S['reset']}\t\tFormatted table output (auto: terminal only)", file=sys.stderr)
+        print(f"  {_S['yellow']}--tty{_S['reset']}\t\tPlain values (false), formatted table (true), auto if unset", file=sys.stderr)
         for p in optional:
             d = self._param_doc(method, p.name)
             desc = f"  {d}" if d else ""
