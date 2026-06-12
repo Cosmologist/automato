@@ -28,32 +28,34 @@ class Interface(CLI):
             raise RuntimeError(f"Interface '{iface}' not found")
         return entries[0]
 
-    def _entry_fields(self, entry: dict, *, ifname=False, status=False, ip=False, gateway=False) -> dict:
+    def _entry_fields(self, entry: dict, *, ifname=True, status=True, ip=True, gateway=True) -> dict:
         out: dict[str, object] = {}
         if ifname:
             out["ifname"] = entry["ifname"]
         if status:
             out["status"] = "UP" if "UP" in entry.get("flags", []) else "DOWN"
-        if ip or gateway:
+        if ip:
             inet4 = [a for a in entry.get("addr_info", []) if a.get("family") == "inet"]
-            if len(inet4) != 1:
-                raise RuntimeError(
-                    f"Expected exactly 1 inet4 address on {entry['ifname']}, got {len(inet4)}"
-                )
-            if ip:
+            if len(inet4) == 1:
                 out["ip"] = f"{inet4[0]['local']}/{inet4[0]['prefixlen']}"
-            if gateway:
+            elif len(inet4) > 1:
+                out["ip"] = ",".join(f"{a['local']}/{a['prefixlen']}" for a in inet4)
+        if gateway:
+            try:
                 gw = self._exec(["ip", "route", "show", "default", "dev", entry["ifname"]])
                 gw_parts = gw.stdout.strip().split()
-                out["gateway"] = gw_parts[2] if len(gw_parts) >= 3 else None
+                if len(gw_parts) >= 3:
+                    out["gateway"] = gw_parts[2]
+            except RuntimeError:
+                pass
         return out
 
     @default_dec
-    @template("{ifname:<16} {status}")
+    @template("{ifname:<16} {status:<5} {ip:<18} {gateway}")
     def list(self) -> list[dict]:
         """List network interfaces"""
         data = self._exec(["ip", "-j", "addr", "show"])
-        return [self._entry_fields(e, ifname=True, status=True) for e in json.loads(data.stdout)]
+        return [self._entry_fields(e) for e in json.loads(data.stdout)]
 
     @template
     def read(self, iface: str, ifname: bool = False, status: bool = False, ip: bool = False, gateway: bool = False) -> str | dict:
@@ -63,8 +65,8 @@ class Interface(CLI):
             iface: Interface name or "default" for the default route interface
             ifname: Include interface name
             status: Include link status (UP/DOWN)
-            ip: Include IPv4 address (requires exactly one inet4 addr)
-            gateway: Include IPv4 gateway (requires exactly one inet4 addr)
+            ip: Include IPv4 address
+            gateway: Include IPv4 gateway
         """
         name = self._resolve_iface(iface)
         entry = self._get_entry(name)
