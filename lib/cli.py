@@ -14,12 +14,11 @@ from typing import Any, get_type_hints
 
 def _ansi():
     if not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
-        return ""
-    return "\033[2m"
+        return "", "", ""
+    return "\033[2m", "\033[1m", "\033[0m"
 
 
-_DIM = _ansi()
-_RESET = "\033[0m" if _DIM else ""
+_DIM, _BOLD, _RESET = _ansi()
 
 
 def default(func):
@@ -243,7 +242,7 @@ class CLI:
                 if result:
                     pad = max(len(k) for k in result) + 2
                     for k, v in result.items():
-                        print(f"{k:{pad}}{v}")
+                        print(f"{_BOLD}{k}{_RESET}{' ' * (pad - len(k))}{v}")
             else:
                 print(tmpl.format_map(_Missing(result)))
         elif isinstance(result, list):
@@ -261,8 +260,9 @@ class CLI:
             return
 
         if isinstance(result, dict):
-            print("\t".join(map(str, result.keys())))
-            print("\t".join(str(v) if v is not None else "" for v in result.values()))
+            pad = max(len(k) for k in result) + 2
+            for k, v in result.items():
+                print(f"{_BOLD}{k}{_RESET}{' ' * (pad - len(k))}{v}")
             return
 
         if isinstance(result, list):
@@ -270,9 +270,15 @@ class CLI:
                 return
             if isinstance(result[0], dict):
                 keys = list(dict.fromkeys(k for d in result for k in d))
-                print("\t".join(keys))
+                widths = [max(len(str(k)), *(len(str(d.get(k, ""))) for d in result)) for k in keys]
+                header = "  ".join(f"{_BOLD}{k}{_RESET}{' ' * (w - len(k))}" for k, w in zip(keys, widths))
+                print(header)
                 for d in result:
-                    print("\t".join(str(d.get(k, "")) if d.get(k) is not None else "" for k in keys))
+                    row = "  ".join(
+                        f"{str(d.get(k, '')) if d.get(k) is not None else ''}{' ' * (w - len(str(d.get(k, '')) if d.get(k) is not None else ''))}"
+                        for k, w in zip(keys, widths)
+                    )
+                    print(row)
             else:
                 for item in result:
                     print(item)
