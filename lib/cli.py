@@ -38,11 +38,10 @@ class CLI:
         instance = cls()
         argv = sys.argv[1:]
 
-        instance._print_header()
-
         commands = instance._get_commands()
 
         if argv and argv[0] in ("--help", "-h"):
+            instance._print_header()
             instance._help(commands)
             return
 
@@ -101,6 +100,7 @@ class CLI:
         if best:
             self._execute(best[1], argv)
         else:
+            self._print_header()
             self._help(commands)
 
     # -- execution --
@@ -153,11 +153,9 @@ class CLI:
         optional = [p for p in params if p.default is not inspect.Parameter.empty]
 
         if argv and argv[0] in ("--help", "-h"):
+            self._print_header()
             self._command_help(method, positional, optional)
             return
-
-        print("#", file=sys.stderr)
-        print(f"# {_S["cyan"]}{self._doc_first(method)}{_S["reset"]}", file=sys.stderr)
 
         pos_values = []
         i = 0
@@ -194,6 +192,7 @@ class CLI:
                     pos_values[idx], hints.get(p.name, str)
                 )
             else:
+                self._print_header()
                 self._error(f"Missing required argument: '{p.name}'")
 
         overflow = pos_values[len(positional):]
