@@ -101,7 +101,7 @@ class CLI:
 
     # -- execution --
 
-    def _print_header(self, method, argv):
+    def _print_header(self, method):
         module = sys.modules.get(self.__class__.__module__)
         prog = Path(module.__file__).name if module else sys.argv[0]
         desc = module.__doc__.strip() if module and module.__doc__ else ""
@@ -121,11 +121,11 @@ class CLI:
         positional = [p for p in params if p.default is inspect.Parameter.empty]
         optional = [p for p in params if p.default is not inspect.Parameter.empty]
 
+        self._print_header(method)
+
         if argv and argv[0] in ("--help", "-h"):
             self._command_help(method, positional, optional)
             return
-
-        self._print_header(method, argv)
 
         pos_values = []
         i = 0
