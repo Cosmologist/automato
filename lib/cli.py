@@ -135,18 +135,17 @@ class CLI:
         prog = Path(module.__file__).name if module else sys.argv[0]
         desc = module.__doc__.strip().rstrip(".") if module and module.__doc__ else ""
 
-        print(f"# {desc}", file=sys.stderr)
+        print(f"# {_BOLD}{desc}{_RESET}", file=sys.stderr)
 
         commands = self._get_commands()
 
         if len(commands) == 1:
             name, method = commands[0]
-            print(f"# {_DIM}Usage: {prog} {name} {self._usage_args(method)}{_RESET}".rstrip(), file=sys.stderr)
+            print(f"# {_DIM}{prog} {name} {self._usage_args(method)}{_RESET}".rstrip(), file=sys.stderr)
         else:
-            print("#", file=sys.stderr)
             for name, method in commands:
                 usage = f"{prog} {name} {self._usage_args(method)}".rstrip()
-                print(f"# {self._doc_first(method)}", file=sys.stderr)
+                print(f"# {_BOLD}{self._doc_first(method)}{_RESET}", file=sys.stderr)
                 for line in textwrap.wrap(usage, width=72):
                     print(f"# {_DIM}{line}{_RESET}", file=sys.stderr)
 
@@ -164,7 +163,7 @@ class CLI:
             return
 
         print("#", file=sys.stderr)
-        print(f"# {self._doc_first(method)}", file=sys.stderr)
+        print(f"# {_BOLD}{self._doc_first(method)}{_RESET}", file=sys.stderr)
 
         pos_values = []
         i = 0
