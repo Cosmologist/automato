@@ -498,7 +498,7 @@ class CLI:
 
         print("OPTIONS:", file=sys.stderr)
         self._print_opt("help", "Show this help or command help")
-        tty_desc = "false — plain-values output for machines\ntrue — decorated output for humans\nunset — automatic selection"
+        tty_desc = "- false — plain-values output for machines\n- true — decorated output for humans\n- unset — automatic selection"
         self._print_opt("tty", tty_desc)
         if len(commands) == 1:
             _, method = commands[0]
@@ -562,7 +562,7 @@ class CLI:
 
         print("OPTIONS:", file=sys.stderr)
         self._print_opt("help", "Show this help or command help")
-        tty_desc = "false — plain-values output for machines\ntrue — decorated output for humans\nunset — automatic selection"
+        tty_desc = "- false — plain-values output for machines\n- true — decorated output for humans\n- unset — automatic selection"
         self._print_opt("tty", tty_desc)
         for p in optional:
             d = self._param_doc(method, p.name)
