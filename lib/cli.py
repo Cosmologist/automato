@@ -36,6 +36,8 @@ class CLI:
         instance._raw_mode = "--raw" in argv
         argv = [a for a in argv if a != "--raw"]
 
+        instance._print_header()
+
         commands = instance._get_commands()
 
         if argv and argv[0] in ("--help", "-h"):
@@ -101,17 +103,19 @@ class CLI:
 
     # -- execution --
 
-    def _print_header(self, method):
+    def _print_header(self):
         module = sys.modules.get(self.__class__.__module__)
         prog = Path(module.__file__).name if module else sys.argv[0]
         desc = module.__doc__.strip() if module and module.__doc__ else ""
-        args = " ".join(
-            f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
-            for p in inspect.signature(method).parameters.values()
-            if p.name != "self"
-        )
+
         print(f"# {desc}", file=sys.stderr)
-        print(f"# Usage: {prog} {method.__name__} {args}", file=sys.stderr)
+        for name, method in self._get_commands():
+            args = " ".join(
+                f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
+                for p in inspect.signature(method).parameters.values()
+                if p.name != "self"
+            )
+            print(f"# Usage: {prog} {name} {args}", file=sys.stderr)
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
@@ -120,8 +124,6 @@ class CLI:
 
         positional = [p for p in params if p.default is inspect.Parameter.empty]
         optional = [p for p in params if p.default is not inspect.Parameter.empty]
-
-        self._print_header(method)
 
         if argv and argv[0] in ("--help", "-h"):
             self._command_help(method, positional, optional)
