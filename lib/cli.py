@@ -144,11 +144,8 @@ class CLI:
             if p.name == "self":
                 continue
             label = labels.get(p.name, p.name)
-            choices = _literal_choices(hints.get(p.name))
-            if choices:
-                label = "|".join(str(c) for c in choices)
             if p.kind == inspect.Parameter.VAR_POSITIONAL:
-                parts.append(f"[{_S['green']}{label}{_S['reset']}]")
+                parts.append(f"[<{_S['green']}{label}{_S['reset']}>...]")
             elif p.default is inspect.Parameter.empty:
                 parts.append(f"<{_S['green']}{label}{_S['reset']}>")
             elif isinstance(p.default, bool):
@@ -507,16 +504,10 @@ class CLI:
         args = []
         for p in positional:
             label = labels.get(p.name, p.name)
-            choices = _literal_choices(hints.get(p.name))
-            if choices:
-                label = "|".join(str(c) for c in choices)
             args.append(f"<{_S['green']}{label}{_S['reset']}>")
         if var_param:
             label = labels.get(var_param.name, var_param.name)
-            choices = _literal_choices(hints.get(var_param.name))
-            if choices:
-                label = "|".join(str(c) for c in choices)
-            args.append(f"[{_S['green']}{label}{_S['reset']}]")
+            args.append(f"[<{_S['green']}{label}{_S['reset']}>...]")
         for p in optional:
             args.append(f"[--{p.name.replace('_', '-')}]")
         commands = self._get_commands()
