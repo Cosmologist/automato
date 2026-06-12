@@ -142,9 +142,9 @@ class CLI:
                     if p.name != "self"
                 )
                 usage = f"{prog} {name} {args}".rstrip()
-                print(f"# {name} — {doc}", file=sys.stderr)
+                print(f"# {doc}", file=sys.stderr)
                 for line in textwrap.wrap(usage, width=72):
-                    print(f"#     {_DIM}{line}{_RESET}", file=sys.stderr)
+                    print(f"# {_DIM}{line}{_RESET}", file=sys.stderr)
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
@@ -157,6 +157,10 @@ class CLI:
         if argv and argv[0] in ("--help", "-h"):
             self._command_help(method, positional, optional)
             return
+
+        doc = method.__doc__.strip().split("\n")[0] if method.__doc__ else ""
+        print("#", file=sys.stderr)
+        print(f"# {doc}", file=sys.stderr)
 
         pos_values = []
         i = 0
