@@ -3,12 +3,23 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import textwrap
 from typing import Any, get_type_hints
+
+
+def _ansi():
+    if not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
+        return ""
+    return "\033[2m"
+
+
+_DIM = _ansi()
+_RESET = "\033[0m" if _DIM else ""
 
 
 def default(func):
@@ -120,7 +131,7 @@ class CLI:
                 for p in inspect.signature(method).parameters.values()
                 if p.name != "self"
             )
-            print(f"# Usage: {prog} {name} {args}".rstrip(), file=sys.stderr)
+            print(f"# {_DIM}Usage: {prog} {name} {args}{_RESET}".rstrip(), file=sys.stderr)
         else:
             print("#", file=sys.stderr)
             for name, method in commands:
@@ -132,10 +143,8 @@ class CLI:
                 )
                 usage = f"{prog} {name} {args}".rstrip()
                 print(f"# {name} — {doc}", file=sys.stderr)
-                print(
-                    textwrap.fill(usage, width=72, initial_indent="#     ", subsequent_indent="#     "),
-                    file=sys.stderr,
-                )
+                for line in textwrap.wrap(usage, width=72):
+                    print(f"#     {_DIM}{line}{_RESET}", file=sys.stderr)
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
