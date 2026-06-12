@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -100,6 +101,18 @@ class CLI:
 
     # -- execution --
 
+    def _print_header(self, method, argv):
+        module = sys.modules.get(self.__class__.__module__)
+        prog = Path(module.__file__).name if module else sys.argv[0]
+        desc = module.__doc__.strip() if module and module.__doc__ else ""
+        args = " ".join(
+            f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[--{p.name.replace('_', '-')}]"
+            for p in inspect.signature(method).parameters.values()
+            if p.name != "self"
+        )
+        print(f"# {desc}", file=sys.stderr)
+        print(f"# Usage: {prog} {method.__name__} {args}", file=sys.stderr)
+
     def _execute(self, method, argv):
         sig = inspect.signature(method)
         hints = get_type_hints(method)
@@ -111,6 +124,8 @@ class CLI:
         if argv and argv[0] in ("--help", "-h"):
             self._command_help(method, positional, optional)
             return
+
+        self._print_header(method, argv)
 
         pos_values = []
         i = 0

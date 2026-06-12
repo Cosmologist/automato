@@ -13,6 +13,19 @@ from lib.cli import CLI, default as default_dec, template
 
 class Interface(CLI):
     @default_dec
+    @template("{ifname:<16} {status}")
+    def list(self) -> list[dict]:
+        """List network interfaces."""
+        data = self._exec(["ip", "-j", "addr", "show"])
+        out = []
+        for entry in json.loads(data.stdout):
+            flags = entry.get("flags", [])
+            out.append({
+                "ifname": entry["ifname"],
+                "status": "UP" if "UP" in flags else "DOWN",
+            })
+        return out
+
     @template
     def read(
         self,

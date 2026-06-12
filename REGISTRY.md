@@ -1,3 +1,3 @@
 # Registry
 
-- `system/network/interfaces` — Read interface info (name, status, IP, gateway)
+- `system/network/interfaces` — List and read network interfaces
