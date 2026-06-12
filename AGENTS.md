@@ -17,7 +17,6 @@ Every endpoint inherits from `lib.cli.CLI`. The base class provides:
 - Method-based command routing (each public method = one CLI command)
 - Automatic argument parsing from method signatures (type hints, defaults)
 - Help generation from docstrings (module → script help, method → command help)
-- JSON output of return values (pretty-printed with indentation)
 - `_exec(cmd, **kwargs)` — wrapper around `subprocess.run` with error handling (raises `RuntimeError` on non-zero exit, default `capture_output=True, text=True`)
 
 Use `self._exec(...)` instead of raw `subprocess.run(...)` to avoid duplicating error handling.
@@ -34,7 +33,61 @@ Arguments are parsed from the method signature:
 - Type hints → type conversion (`str`, `int`, `float`, `bool`)
 
 ### Output
-Methods **return** data structures (dict, list, str, etc.) — they never print. The base class serialises the return value as pretty-printed JSON.
+Methods **return** data structures (dict, list, str, etc.) — they never print. The base class serialises the return value:
+
+- **With `@template` decorator** — formatted output (bare → aligned `key: value`, pattern → custom format)
+- **Without `@template`** — aligned table (TSV-style with bold headers)
+- Errors → plain text to stderr (no JSON)
+
+### Styling (stderr header)
+Every invocation prints a header to stderr with ANSI colors (when terminal supports it, respects `NO_COLOR`):
+
+| Element | ANSI | Example |
+|---|---|---|
+| Module description | `\033[36m` (cyan) | `# Show interface details` |
+| Command name in listing | `\033[1m` (bold) | `#   show    Description` |
+| Full usage line | `\033[2m` (dim) | `#   interface.py show <iface> [--args]` |
+| Data keys/output | `\033[1m` (bold) | `name     eno1` |
+
+Single-command format:
+```
+# <module desc>
+#   <prog> <cmd> [args]
+```
+
+Multi-command format:
+```
+# <module desc>
+#
+#   <cmd>    <description>
+#            <prog> <cmd> [args]
+#   <cmd>    <description>
+#            <prog> <cmd> [args]
+```
+
+The current command's description is printed again before the output:
+```
+# <current command description>
+<data>
+```
+
+### `@template` decorator
+Format method output with a custom template:
+
+```python
+@template                              # aligned key: value
+@template("{ifname:<16} {status}")     # custom format string
+```
+
+A method without `@template` gets aligned table output. Missing template keys render as empty string (no crash).
+
+### `_arg_labels` class attribute
+Override positional argument display in usage/help:
+
+```python
+class MyEndpoint(CLI):
+    _arg_labels = {"iface": "iface|default"}
+```
 
 ### Help
 - Module docstring → script-level help text
