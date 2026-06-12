@@ -14,11 +14,16 @@ from typing import Any, get_type_hints
 
 def _ansi():
     if not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
-        return "", "", ""
-    return "\033[2m", "\033[1m", "\033[0m"
+        return {"dim": "", "bold": "", "cyan": "", "reset": ""}
+    return {
+        "dim": "\033[2m",
+        "bold": "\033[1m",
+        "cyan": "\033[36m",
+        "reset": "\033[0m",
+    }
 
 
-_DIM, _BOLD, _RESET = _ansi()
+_S = _ansi()
 
 
 def default(func):
@@ -135,19 +140,19 @@ class CLI:
         prog = Path(module.__file__).name if module else sys.argv[0]
         desc = module.__doc__.strip().rstrip(".") if module and module.__doc__ else ""
 
-        print(f"# {_BOLD}{desc}{_RESET}", file=sys.stderr)
+        print(f"# {_S["cyan"]}{desc}{_S["reset"]}", file=sys.stderr)
 
         commands = self._get_commands()
 
         if len(commands) == 1:
             name, method = commands[0]
-            print(f"# {_DIM}{prog} {name} {self._usage_args(method)}{_RESET}".rstrip(), file=sys.stderr)
+            print(f"#   {_S["dim"]}{prog} {name} {self._usage_args(method)}{_S["reset"]}".rstrip(), file=sys.stderr)
         else:
             for name, method in commands:
                 usage = f"{prog} {name} {self._usage_args(method)}".rstrip()
-                print(f"# {_BOLD}{self._doc_first(method)}{_RESET}", file=sys.stderr)
+                print(f"#   {_S["bold"]}{name:<8}{_S["reset"]}{self._doc_first(method)}", file=sys.stderr)
                 for line in textwrap.wrap(usage, width=72):
-                    print(f"# {_DIM}{line}{_RESET}", file=sys.stderr)
+                    print(f"#       {_S["dim"]}{line}{_S["reset"]}", file=sys.stderr)
 
 
     def _execute(self, method, argv):
@@ -163,7 +168,7 @@ class CLI:
             return
 
         print("#", file=sys.stderr)
-        print(f"# {_BOLD}{self._doc_first(method)}{_RESET}", file=sys.stderr)
+        print(f"# {_S["cyan"]}{self._doc_first(method)}{_S["reset"]}", file=sys.stderr)
 
         pos_values = []
         i = 0
@@ -241,7 +246,7 @@ class CLI:
                 if result:
                     pad = max(len(k) for k in result) + 2
                     for k, v in result.items():
-                        print(f"{_BOLD}{k}{_RESET}{' ' * (pad - len(k))}{v}")
+                        print(f"{_S["bold"]}{k}{_S["reset"]}{' ' * (pad - len(k))}{v}")
             else:
                 print(tmpl.format_map(_Missing(result)))
         elif isinstance(result, list):
@@ -261,7 +266,7 @@ class CLI:
         if isinstance(result, dict):
             pad = max(len(k) for k in result) + 2
             for k, v in result.items():
-                print(f"{_BOLD}{k}{_RESET}{' ' * (pad - len(k))}{v}")
+                print(f"{_S["bold"]}{k}{_S["reset"]}{' ' * (pad - len(k))}{v}")
             return
 
         if isinstance(result, list):
@@ -270,7 +275,7 @@ class CLI:
             if isinstance(result[0], dict):
                 keys = list(dict.fromkeys(k for d in result for k in d))
                 widths = [max(len(str(k)), *(len(str(d.get(k, ""))) for d in result)) for k in keys]
-                header = "  ".join(f"{_BOLD}{k}{_RESET}{' ' * (w - len(k))}" for k, w in zip(keys, widths))
+                header = "  ".join(f"{_S["bold"]}{k}{_S["reset"]}{' ' * (w - len(k))}" for k, w in zip(keys, widths))
                 print(header)
                 for d in result:
                     row = "  ".join(
