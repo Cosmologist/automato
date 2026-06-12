@@ -30,7 +30,7 @@ class Interface(CLI):
 
         Args:
             name: Interface name or "default"
-            fields: Fields to show
+            fields: Fields to show (default: all)
         """
         requested = set(fields) if fields else {"name", "status", "mtu", "ip", "gateway"}
 
