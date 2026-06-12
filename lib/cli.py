@@ -482,7 +482,7 @@ class CLI:
         print(f"  {_S['yellow']}--help{_S['reset']}\tShow this help or command help", file=sys.stderr)
         opt_fmt = f"  {_S['yellow']}--tty{_S['reset']}"
         col_desc = 16
-        extra = col_desc - 6
+        extra = col_desc - 7
         tty_text = "false — plain-values output for machines; true — decorated output for humans; unset — automatic selection"
         cols = shutil.get_terminal_size().columns
         avail = cols - col_desc
@@ -555,7 +555,7 @@ class CLI:
         print(f"  {_S['yellow']}--help{_S['reset']}\tShow this help or command help", file=sys.stderr)
         opt_fmt = f"  {_S['yellow']}--tty{_S['reset']}"
         col_desc = 16
-        extra = col_desc - 6
+        extra = col_desc - 7
         tty_text = "false — plain-values output for machines; true — decorated output for humans; unset — automatic selection"
         cols = shutil.get_terminal_size().columns
         avail = cols - col_desc
