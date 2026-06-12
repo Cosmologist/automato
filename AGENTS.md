@@ -147,6 +147,11 @@ Usage shows `[<fields>...]`, help shows the choices in the FIELDS section.
 - Each subproject within automato has its own version tag: `system-network-interface-1.0.0`
 - Set `_version` and `_name` class attributes in each endpoint
 - Tag only before push
+- Push workflow:
+  1. Update `_version` in the endpoint module
+  2. Commit the change
+  3. Tag non-annotated: `git tag <module>-<version>` and `git tag automato-<version>`
+  4. Push: `git push origin master --tags`
 
 ### Requirements
 Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
