@@ -34,18 +34,14 @@ def exec_cmd(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     result = subprocess.run(cmd, **kwargs)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if os.geteuid() != 0:
-            answer = input(
-                f"Command failed. Retry with sudo? [y/N]: "
-            ).strip().lower()
-            if answer in ("y", "yes"):
-                restart_as_superuser()
+        if os.geteuid() != 0 and sys.stdin.isatty():
+            try:
+                answer = input(
+                    f"Command failed. Retry with sudo? [y/N]: "
+                ).strip().lower()
+                if answer in ("y", "yes"):
+                    restart_as_superuser()
+            except (EOFError, KeyboardInterrupt):
+                pass
         raise CommandError(cmd, result.returncode, stderr)
     return result
-
-
-def require_tool(tool: str) -> None:
-    """Install a missing tool via apt."""
-    if shutil.which(tool) is None:
-        print(f"Installing missing tool: {tool}")
-        exec_cmd(["apt", "install", "-y", tool])

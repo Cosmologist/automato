@@ -360,7 +360,7 @@ class CLI:
                 else:
                     for item in result:
                         print(item)
-            elif not isinstance(result, str):
+            else:
                 print(result)
             return
 
