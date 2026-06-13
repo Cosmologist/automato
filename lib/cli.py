@@ -38,79 +38,114 @@ def _ansi():
 _S = _ansi()
 
 
-def default(func):
-    func._cli_default = True
-    return func
-
-
-
 class CLI:
-    _arg_labels: dict[str, str] = {}
-    _version: str = ""
-    _name: str = ""
-    _icon: str = "▸"
-
-    def __init__(self):
+    def __init__(self, *, version="", name="", icon="\u25b8", arg_labels=None, description="", prog=None):
+        self._version = version
+        self._name = name
+        self._icon = icon
+        self._arg_labels = arg_labels or {}
+        self._description = description
+        self._prog = prog or sys.argv[0]
         self._tty: bool | None = None
+        self._commands: dict[str, dict] = {}
 
-    @classmethod
-    def run(cls):
-        instance = cls()
+    def command(self, fn=None, *, name=None, default=False):
+        if fn is None:
+            return lambda f: self.command(f, name=name, default=default)
+        cmd_name = name or fn.__name__
+        self._commands[cmd_name] = {"fn": fn, "default": default}
+        return fn
+
+    def run(self):
         argv = sys.argv[1:]
 
         for i, a in enumerate(argv):
             if a.startswith("--tty"):
                 if "=" in a:
                     val = a.split("=", 1)[1].lower()
-                    instance._tty = val in ("true", "yes", "1")
+                    self._tty = val in ("true", "yes", "1")
                 elif i + 1 < len(argv) and argv[i + 1].lower() in ("true", "false", "yes", "no", "1", "0"):
                     val = argv.pop(i + 1).lower()
-                    instance._tty = val in ("true", "yes", "1")
+                    self._tty = val in ("true", "yes", "1")
                 else:
-                    instance._tty = True
+                    self._tty = True
                 argv = [x for x in argv if not x.startswith("--tty")]
                 break
 
-        commands = instance._get_commands()
+        commands = self._get_commands()
 
         if argv and argv[0] in ("--help", "-h"):
-            instance._help(commands)
+            self._help(commands)
             return
 
         if not argv:
-            instance._run_best_default(commands, argv)
+            self._run_best_default(commands, argv)
             return
 
         cmd = argv[0]
-        method = getattr(instance, cmd, None)
-        cmd_names = [n for n, _ in commands]
+        entry = self._commands.get(cmd)
 
-        if method and cmd in cmd_names:
-            instance._execute(method, argv[1:])
+        if entry:
+            self._execute(entry["fn"], argv[1:])
         else:
-            instance._run_best_default(commands, argv)
+            self._run_best_default(commands, argv)
+
+    def exec(self, cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+        kwargs.setdefault("capture_output", True)
+        kwargs.setdefault("text", True)
+        result = subprocess.run(cmd, **kwargs)
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            raise RuntimeError(stderr or f"Command failed: {' '.join(cmd)}")
+        return result
+
+    def require_output(self, cmd: list[str], **kwargs) -> str:
+        result = self.exec(cmd, **kwargs)
+        out = result.stdout.strip()
+        if not out:
+            raise RuntimeError(f"`{' '.join(cmd)}` completed with no output")
+        return out
+
+    def error(self, msg: str, show_usage: bool = False):
+        if show_usage:
+            self._print_usage()
+        print(f"{_S['red']}{msg}{_S['reset']}", file=sys.stderr)
+        sys.exit(1)
+
+    def print_opt(self, name: str, desc: str):
+        cols = shutil.get_terminal_size().columns
+        col_desc = 16
+        opt_fmt = f"  {_S['yellow']}--{name}{_S['reset']}"
+        opt_len = len(name) + 4
+        extra = col_desc - opt_len
+        avail = cols - col_desc
+        pad = " " * (col_desc - 2)
+        parts = desc.split("\n")
+        for i, part in enumerate(parts):
+            lines = textwrap.wrap(part, width=max(20, avail))
+            if i == 0:
+                print(f"{opt_fmt}{' ' * extra}{lines[0]}", file=sys.stderr)
+            else:
+                print(f"  {pad}{lines[0]}", file=sys.stderr)
+            for line in lines[1:]:
+                print(f"  {pad}{line}", file=sys.stderr)
 
     # -- introspection --
 
     def _get_commands(self):
-        return [
-            (n, m)
-            for n, m in inspect.getmembers(self, inspect.ismethod)
-            if not n.startswith("_")
-            and m.__func__.__qualname__.startswith(self.__class__.__qualname__)
-        ]
+        return [(name, entry["fn"]) for name, entry in self._commands.items()]
 
     def _get_default(self, commands):
-        for name, method in commands:
-            if getattr(method.__func__, "_cli_default", False):
-                return name, method
+        for name, fn in commands:
+            if self._commands[name]["default"]:
+                return name, fn
         return commands[0] if commands else None
 
     def _run_best_default(self, commands, argv):
         defaults = [
             (n, m)
             for n, m in commands
-            if getattr(m.__func__, "_cli_default", False)
+            if self._commands[n]["default"]
         ] or commands[:1]
 
         best = None
@@ -121,7 +156,7 @@ class CLI:
                 [
                     p
                     for p in sig.parameters.values()
-                    if p.name != "self" and p.default is inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL
+                    if p.default is inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL
                 ]
             )
             score = min(len(argv), pos_count)
@@ -137,12 +172,10 @@ class CLI:
     # -- execution --
 
     def _usage_args(self, method):
-        labels = getattr(self.__class__, "_arg_labels", {})
+        labels = self._arg_labels
         hints = get_type_hints(method)
         parts = []
         for p in inspect.signature(method).parameters.values():
-            if p.name == "self":
-                continue
             label = labels.get(p.name, p.name)
             if p.kind == inspect.Parameter.VAR_POSITIONAL:
                 parts.append(f"[<{_S['green']}{label}{_S['reset']}>...]")
@@ -158,8 +191,7 @@ class CLI:
         return f"[{_S['yellow']}--help{_S['reset']}] [{_S['yellow']}--tty{_S['reset']}]"
 
     def _prog_name(self):
-        module = sys.modules.get(self.__class__.__module__)
-        return Path(module.__file__).name if module else sys.argv[0]
+        return Path(self._prog).name
 
     @staticmethod
     def _doc_first(method):
@@ -170,8 +202,7 @@ class CLI:
         return len(re.sub(r'\033\[[0-9;]*m', '', s))
 
     def _print_banner(self):
-        module = sys.modules.get(self.__class__.__module__)
-        desc = module.__doc__.strip().rstrip(".") if module and module.__doc__ else ""
+        desc = self._description
         name = self._name or self._prog_name()
         icon = self._icon
         ver = self._version
@@ -183,19 +214,19 @@ class CLI:
         prefix = f"{_S['bold']}[{icon}] {name}{_S['reset']}"
         desc_bold = f"{_S['bold']}{desc}{_S['reset']}"
 
-        full = f"{prefix} — {desc_bold}{ver_text}"
+        full = f"{prefix} \u2014 {desc_bold}{ver_text}"
         full_visible = self._visible_len(full)
 
         if full_visible <= cols:
             print(full, file=sys.stderr)
-            print("─" * min(cols, 80), file=sys.stderr)
+            print("\u2500" * min(cols, 80), file=sys.stderr)
             return
 
-        full_no_ver = f"{prefix} — {desc_bold}"
+        full_no_ver = f"{prefix} \u2014 {desc_bold}"
         full_no_ver_visible = self._visible_len(full_no_ver)
         if full_no_ver_visible <= cols:
             print(full_no_ver, file=sys.stderr)
-            print("─" * min(cols, 80), file=sys.stderr)
+            print("\u2500" * min(cols, 80), file=sys.stderr)
             return
 
         print(prefix, file=sys.stderr)
@@ -214,7 +245,7 @@ class CLI:
                 for line in wrapped.split("\n"):
                     print(f"{_S['bold']}{line}{_S['reset']}", file=sys.stderr)
 
-        print("─" * min(cols, 80), file=sys.stderr)
+        print("\u2500" * min(cols, 80), file=sys.stderr)
 
     def _print_header(self):
         if self._tty is False:
@@ -236,15 +267,14 @@ class CLI:
             print(f"Usage: {_S['bold']}{_S['cyan']}{prog}{_S['reset']} <{_S['bold']}{_S['cyan']}command{_S['reset']}> [args...] {self._cli_opts()}", file=sys.stderr)
             for name, method in commands:
                 usage = f"{prog} {name} {self._usage_args(method)}".rstrip()
-                print(f"  {_S['bold']}{_S['cyan']}{name:<12}{_S['reset']}{self._doc_first(method)}", file=sys.stderr)
-                print(f"    {_S["dim"]}{usage}{_S["reset"]}", file=sys.stderr)
-        print("─" * min(cols, 80), file=sys.stderr)
-
+                print(f"  {_S['bold']}{_S['cyan']}{name:<16}{_S['reset']} {self._doc_first(method)}", file=sys.stderr)
+                print(f"    {_S['dim']}{usage}{_S['reset']}", file=sys.stderr)
+        print("\u2500" * min(cols, 80), file=sys.stderr)
 
     def _execute(self, method, argv):
         sig = inspect.signature(method)
         hints = get_type_hints(method)
-        params = [p for p in sig.parameters.values() if p.name != "self"]
+        params = list(sig.parameters.values())
 
         var_param = None
         positional = []
@@ -271,7 +301,7 @@ class CLI:
             i += 1
 
         if not var_param and len(pos_values) > len(positional) + len(optional):
-            self._error(f"Too many arguments for '{method.__name__}'", show_usage=True)
+            self.error(f"Too many arguments for '{method.__name__}'", show_usage=True)
 
         kwargs = {}
         while i < len(argv):
@@ -283,7 +313,7 @@ class CLI:
                     name = name.replace("-", "_")
                     matching = [p for p in optional if p.name == name]
                     if not matching:
-                        self._error(f"Unknown option: --{name}", show_usage=True)
+                        self.error(f"Unknown option: --{name}", show_usage=True)
                     p = matching[0]
                     t = hints.get(p.name, str)
                     kwargs[name] = self._convert(val, t)
@@ -291,14 +321,14 @@ class CLI:
                     name = raw.replace("-", "_")
                     matching = [p for p in optional if p.name == name]
                     if not matching:
-                        self._error(f"Unknown option: {arg}", show_usage=True)
+                        self.error(f"Unknown option: {arg}", show_usage=True)
                     p = matching[0]
                     t = hints.get(p.name, str)
                     if t == bool:
                         kwargs[name] = True
                     else:
                         if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
-                            self._error(f"Option '{arg}' requires a value", show_usage=True)
+                            self.error(f"Option '{arg}' requires a value", show_usage=True)
                         i += 1
                         kwargs[name] = self._convert(argv[i], t)
             i += 1
@@ -310,7 +340,7 @@ class CLI:
                     pos_values[idx], hints.get(p.name, str)
                 ))
             else:
-                self._error(f"Missing required argument: '{p.name}'", show_usage=True)
+                self.error(f"Missing required argument: '{p.name}'", show_usage=True)
 
         overflow = pos_values[len(positional):]
         h_var = hints.get(var_param.name, str) if var_param else None
@@ -318,7 +348,7 @@ class CLI:
             choices = _literal_choices(h_var)
             for v in overflow:
                 if choices and v not in choices:
-                    self._error(f"Unknown field: '{v}'", show_usage=True)
+                    self.error(f"Unknown field: '{v}'", show_usage=True)
                 pos_args.append(self._convert(v, h_var))
         else:
             kw_args = {}
@@ -338,7 +368,7 @@ class CLI:
             else:
                 result = method(*pos_args, **kw_args)
         except Exception as e:
-            self._error(str(e), show_usage=True)
+            self.error(str(e), show_usage=True)
             return
 
         if result is not None:
@@ -413,46 +443,6 @@ class CLI:
             return float(value)
         return value
 
-    def _exec(self, cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-        kwargs.setdefault("capture_output", True)
-        kwargs.setdefault("text", True)
-        result = subprocess.run(cmd, **kwargs)
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            raise RuntimeError(stderr or f"Command failed: {' '.join(cmd)}")
-        return result
-
-    def _require_output(self, cmd: list[str], **kwargs) -> str:
-        result = self._exec(cmd, **kwargs)
-        out = result.stdout.strip()
-        if not out:
-            raise RuntimeError(f"`{' '.join(cmd)}` completed with no output")
-        return out
-
-    def _error(self, msg: str, show_usage: bool = False):
-        if show_usage:
-            self._print_usage()
-        print(f"{_S['red']}{msg}{_S['reset']}", file=sys.stderr)
-        sys.exit(1)
-
-    def _print_opt(self, name: str, desc: str):
-        cols = shutil.get_terminal_size().columns
-        col_desc = 16
-        opt_fmt = f"  {_S['yellow']}--{name}{_S['reset']}"
-        opt_len = len(name) + 4
-        extra = col_desc - opt_len
-        avail = cols - col_desc
-        pad = " " * (col_desc - 2)
-        parts = desc.split("\n")
-        for i, part in enumerate(parts):
-            lines = textwrap.wrap(part, width=max(20, avail))
-            if i == 0:
-                print(f"{opt_fmt}{' ' * extra}{lines[0]}", file=sys.stderr)
-            else:
-                print(f"  {pad}{lines[0]}", file=sys.stderr)
-            for line in lines[1:]:
-                print(f"  {pad}{line}", file=sys.stderr)
-
     # -- help --
 
     def _help(self, commands):
@@ -462,18 +452,17 @@ class CLI:
         self._print_usage()
         print(file=sys.stderr)
 
-        module = sys.modules.get(self.__class__.__module__)
-        prog = module.__file__ if module else sys.argv[0]
+        prog = self._prog
 
         if len(commands) == 1:
             _, method = commands[0]
-            labels = getattr(self.__class__, "_arg_labels", {})
+            labels = self._arg_labels
             hints = get_type_hints(method)
 
             sig = inspect.signature(method)
-            positional = [p for p in sig.parameters.values() if p.name != "self" and p.default is inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
+            positional = [p for p in sig.parameters.values() if p.default is inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
             var_param = next((p for p in sig.parameters.values() if p.kind == inspect.Parameter.VAR_POSITIONAL), None)
-            optional = [p for p in sig.parameters.values() if p.name != "self" and p.default is not inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
+            optional = [p for p in sig.parameters.values() if p.default is not inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
 
             if positional:
                 print("ARGUMENTS:", file=sys.stderr)
@@ -500,17 +489,17 @@ class CLI:
                 doc = method.__doc__
                 d = doc.strip().split("\n")[0] if doc else ""
                 args = self._usage_args(method)
-                print(f"  {_S['bold']}{_S['cyan']}{name:<12}{_S['reset']}{d} {_S['dim']}({prog} {name} {args}){_S['reset']}", file=sys.stderr)
+                print(f"  {_S['bold']}{_S['cyan']}{name:<16}{_S['reset']} {d} {_S['dim']}({prog} {name} {args}){_S['reset']}", file=sys.stderr)
             print(file=sys.stderr)
 
         print("OPTIONS:", file=sys.stderr)
-        self._print_opt("help", "Show this help or command help")
-        tty_desc = "- false — plain-values output for machines\n- true — decorated output for humans\n- unset — automatic selection"
-        self._print_opt("tty", tty_desc)
+        self.print_opt("help", "Show this help or command help")
+        tty_desc = "- false \u2014 plain-values output for machines\n- true \u2014 decorated output for humans\n- unset \u2014 automatic selection"
+        self.print_opt("tty", tty_desc)
         if len(commands) == 1:
             _, method = commands[0]
             sig = inspect.signature(method)
-            optional = [p for p in sig.parameters.values() if p.name != "self" and p.default is not inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
+            optional = [p for p in sig.parameters.values() if p.default is not inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
             for p in optional:
                 d = self._param_doc(method, p.name)
                 desc = f"  {d}" if d else ""
@@ -524,7 +513,7 @@ class CLI:
         if self._tty is False:
             sys.exit(0)
 
-        labels = getattr(self.__class__, "_arg_labels", {})
+        labels = self._arg_labels
         hints = get_type_hints(method)
         prog = self._prog_name()
         args = []
@@ -540,7 +529,7 @@ class CLI:
         if len(commands) > 1:
             print(f"Usage: {_S['bold']}{_S['cyan']}{prog}{_S['reset']} {_S['bold']}{_S['cyan']}{method.__name__}{_S['reset']} {' '.join(args)} {self._cli_opts()}", file=sys.stderr)
             cols = shutil.get_terminal_size().columns
-            print("─" * min(cols, 80), file=sys.stderr)
+            print("\u2500" * min(cols, 80), file=sys.stderr)
             print(file=sys.stderr)
 
         if error:
@@ -568,9 +557,9 @@ class CLI:
             print(file=sys.stderr)
 
         print("OPTIONS:", file=sys.stderr)
-        self._print_opt("help", "Show this help or command help")
-        tty_desc = "- false — plain-values output for machines\n- true — decorated output for humans\n- unset — automatic selection"
-        self._print_opt("tty", tty_desc)
+        self.print_opt("help", "Show this help or command help")
+        tty_desc = "- false \u2014 plain-values output for machines\n- true \u2014 decorated output for humans\n- unset \u2014 automatic selection"
+        self.print_opt("tty", tty_desc)
         for p in optional:
             d = self._param_doc(method, p.name)
             desc = f"  {d}" if d else ""

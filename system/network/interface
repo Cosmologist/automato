@@ -9,32 +9,33 @@ from pathlib import Path
 from typing import Literal, get_type_hints
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.cli import CLI, _literal_choices, default as default_dec
+from lib.cli import CLI, _literal_choices
 
 
-class Interface(CLI):
-    _version = "1.1.0"
+def _resolve_iface(cli, name: str) -> str:
+    if name == "default":
+        output = cli.require_output(["ip", "route", "show", "default"])
+        return output.splitlines()[0].split()[4]
+    return name
 
-    def _resolve_iface(self, name: str) -> str:
-        if name == "default":
-            output = self._require_output(["ip", "route", "show", "default"])
-            return output.splitlines()[0].split()[4]
-        return name
 
-    @default_dec
-    def show(self, name: str, *fields: Literal["name", "status", "mtu", "ip", "gateway"]) -> dict:
+def main():
+    cli = CLI(version="1.1.0", prog=__file__, description="Show network interface info")
+
+    @cli.command(default=True)
+    def show(name: str, *fields: Literal["name", "status", "mtu", "ip", "gateway"]) -> dict:
         """Show interface details
 
         Args:
             name: Interface name or "default"
             fields: Fields to show (default: all)
         """
-        hints = get_type_hints(self.show)
+        hints = get_type_hints(show)
         choices = _literal_choices(hints.get("fields"))
         requested = set(fields) if fields else set(choices)
 
-        resolved = self._resolve_iface(name)
-        data = self._exec(["ip", "-j", "addr", "show", resolved])
+        resolved = _resolve_iface(cli, name)
+        data = cli.exec(["ip", "-j", "addr", "show", resolved])
         entries = json.loads(data.stdout)
         if not entries:
             raise RuntimeError(f"Interface '{resolved}' not found")
@@ -56,11 +57,13 @@ class Interface(CLI):
             if "ip" in requested:
                 out["ip"] = f"{inet4[0]['local']}/{inet4[0]['prefixlen']}"
             if "gateway" in requested:
-                gw_out = self._require_output(["ip", "route", "show", "default", "dev", resolved])
+                gw_out = cli.require_output(["ip", "route", "show", "default", "dev", resolved])
                 gw_parts = gw_out.split()
                 out["gateway"] = gw_parts[2] if len(gw_parts) >= 3 else None
         return out
 
+    cli.run()
+
 
 if __name__ == "__main__":
-    Interface.run()
+    main()

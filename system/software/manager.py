@@ -13,51 +13,88 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.cli import CLI, default as default_dec
+from lib.cli import CLI
 from lib.utils import exec_cmd, CommandError
 
 
 _ARCHIVE_EXTS = (".tar.gz", ".tar.bz2", ".tar.xz", ".zip", ".tgz", ".tar")
 
 
-class Manager(CLI):
-    _version = "1.0.0"
+def install_apt(name: str) -> bool:
+    """Install via apt
 
-    @default_dec
-    def require(self, name: str) -> str:
-        """Require a software package — install if missing
+    Args:
+        name: APT package name
+    """
+    if not shutil.which("apt"):
+        return False
+    print(f"Installing via apt: {name}")
+    exec_cmd(["apt", "install", "-y", name])
+    return True
 
-        Args:
-            name: Package name (apt name or tool name for GitHub search)
-        """
-        path = shutil.which(name)
 
-        if path is not None:
-            return path
-        elif self.install_apt(name):
-            pass
-        elif self.install_github(name):
-            pass
+def _install_github_release(owner: str, repo: str) -> None:
+    print(f"Fetching latest release for {owner}/{repo}...")
 
-        path = shutil.which(name)
-        if path is not None:
-            return path
+    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "automato/1.0")
 
-        raise RuntimeError(f"Unknowntool: {name}")
+    with urllib.request.urlopen(req) as resp:
+        release = json.loads(resp.read().decode())
 
-    def install_apt(self, name: str) -> bool:
-        """Install via apt
+    assets = release.get("assets", [])
+    if not assets:
+        raise RuntimeError(f"No assets found in latest release of {owner}/{repo}")
 
-        Args:
-            name: APT package name
-        """
-        if not shutil.which("apt"):
-            return False
-        print(f"Installing via apt: {name}")
-        exec_cmd(["apt", "install", "-y", name])
-        return True
+    asset = _pick_github_asset(assets, repo)
 
-    def install_github(self, name: str) -> bool:
+    dest = Path.home() / ".local" / "bin"
+    dest.mkdir(parents=True, exist_ok=True)
+    dest_path = dest / repo
+
+    print(f"Downloading {asset['name']}...")
+    dl_req = urllib.request.Request(asset["browser_download_url"])
+    dl_req.add_header("User-Agent", "automato/1.0")
+    dl_req.add_header("Accept", "application/octet-stream")
+    with urllib.request.urlopen(dl_req) as resp:
+        with open(dest_path, "wb") as f:
+            while True:
+                chunk = resp.read(8192)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+    dest_path.chmod(dest_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    print(f"Installed {repo} to {dest_path}")
+
+
+def _pick_github_asset(assets: list[dict], repo: str) -> dict:
+    suitable = [
+        a for a in assets
+        if not any(a["name"].endswith(ext) for ext in _ARCHIVE_EXTS)
+    ]
+    if not suitable:
+        raise RuntimeError("No suitable asset found \u2014 all assets are archives")
+
+    if len(suitable) == 1:
+        return suitable[0]
+
+    for a in suitable:
+        name = a["name"]
+        if name == repo or name.startswith(f"{repo}_") or name.startswith(f"{repo}-"):
+            return a
+        if name.endswith((".pyz", ".phar")):
+            return a
+
+    return suitable[0]
+
+
+def main():
+    cli = CLI(version="1.0.0", prog=__file__, description="Software package manager")
+
+    def install_github(name: str) -> bool:
         """Install from GitHub release by searching repo name
 
         Args:
@@ -71,7 +108,7 @@ class Manager(CLI):
             if shutil.which("gh") is None:
                 return False
 
-        result = self._exec(["gh", "search", "repos", "--match", "name", name, "--json", "fullName", "--limit", "20"])
+        result = cli.exec(["gh", "search", "repos", "--match", "name", name, "--json", "fullName", "--limit", "20"])
         repos = json.loads(result.stdout)
 
         exact = [
@@ -88,66 +125,36 @@ class Manager(CLI):
             )
 
         owner, repo = exact[0]["fullName"].split("/")
-        self._install_github_release(owner, repo)
+        _install_github_release(owner, repo)
         return True
 
-    def _install_github_release(self, owner: str, repo: str) -> None:
-        print(f"Fetching latest release for {owner}/{repo}...")
+    @cli.command(default=True)
+    def require(name: str) -> str:
+        """Require a software package \u2014 install if missing
 
-        url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-        req = urllib.request.Request(url)
-        req.add_header("Accept", "application/vnd.github+json")
-        req.add_header("User-Agent", "automato/1.0")
+        Args:
+            name: Package name (apt name or tool name for GitHub search)
+        """
+        path = shutil.which(name)
 
-        with urllib.request.urlopen(req) as resp:
-            release = json.loads(resp.read().decode())
+        if path is not None:
+            return path
+        elif install_apt(name):
+            pass
+        elif install_github(name):
+            pass
 
-        assets = release.get("assets", [])
-        if not assets:
-            raise RuntimeError(f"No assets found in latest release of {owner}/{repo}")
+        path = shutil.which(name)
+        if path is not None:
+            return path
 
-        asset = self._pick_github_asset(assets, repo)
+        raise RuntimeError(f"Unknown tool: {name}")
 
-        dest = Path.home() / ".local" / "bin"
-        dest.mkdir(parents=True, exist_ok=True)
-        dest_path = dest / repo
+    cli.command(name="install-apt")(install_apt)
+    cli.command(name="install-github")(install_github)
 
-        print(f"Downloading {asset['name']}...")
-        dl_req = urllib.request.Request(asset["browser_download_url"])
-        dl_req.add_header("User-Agent", "automato/1.0")
-        dl_req.add_header("Accept", "application/octet-stream")
-        with urllib.request.urlopen(dl_req) as resp:
-            with open(dest_path, "wb") as f:
-                while True:
-                    chunk = resp.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-
-        dest_path.chmod(dest_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        print(f"Installed {repo} to {dest_path}")
-
-    @staticmethod
-    def _pick_github_asset(assets: list[dict], repo: str) -> dict:
-        suitable = [
-            a for a in assets
-            if not any(a["name"].endswith(ext) for ext in _ARCHIVE_EXTS)
-        ]
-        if not suitable:
-            raise RuntimeError("No suitable asset found — all assets are archives")
-
-        if len(suitable) == 1:
-            return suitable[0]
-
-        for a in suitable:
-            name = a["name"]
-            if name == repo or name.startswith(f"{repo}_") or name.startswith(f"{repo}-"):
-                return a
-            if name.endswith((".pyz", ".phar")):
-                return a
-
-        return suitable[0]
+    cli.run()
 
 
 if __name__ == "__main__":
-    Manager.run()
+    main()
