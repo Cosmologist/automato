@@ -5,7 +5,7 @@ The project contains various useful scripts, semantically structured, with CRUDL
 Use **English** for all code, comments, commit messages, and documentation.
 
 ## Preferred programming language
-Python only.
+Python only (exclude app/ - for apps we can choose any suitable language).
 
 ## Architecture
 
