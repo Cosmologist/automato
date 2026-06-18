@@ -1,16 +1,15 @@
 # Automato — Agent Guide
-The project contains various useful scripts, semantically structured, with CRUDL-like input and JSON-like output.
+The project contains various useful, semantically structured and ready to embed (via pipes or code) tools.
 
-## Language
-Use **English** for all code, comments, commit messages, and documentation.
-
-## Preferred programming language
-Python only (exclude app/ - for apps we can choose any suitable language).
-
-## Architecture
-
-### Endpoint
-An **endpoint** is a Python module at the end of a directory tree: `./[domain]/([subdomain]/)+<action>.py`. It must be executable and self-contained — the only allowed dependency is `lib.cli.CLI`.
+**Language** - use **English** for all code, comments, commit messages, and documentation.
+**Filesystem Structure**:
+  - `<applicable-domain>/<tool>` - if applicable domain contains only this one tool, example `amneziawg\client`.
+  - `<applicable-domain>/<applicable-subdomin>/<tool>` - if applicable domain contains only this one tool, example `system/network/interface`.  
+  - `app/` is a sandbox for application prototypes (specialized application tasks).
+  - `configure/`, `examples/`, `tools/` - legacy stuff - ignore them.
+  - `lib/` - for internal use, for boilerplates, utils, wrappers etc.   
+**Tool naming** - prefer *entity name* of applicable domain/subdomain.
+**Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed).
 
 ### CLI component (composition)
 Endpoints use `CLI` as a **component**, not a base class. Each endpoint defines a `main()` function that:
