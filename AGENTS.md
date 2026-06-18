@@ -26,7 +26,8 @@ The project contains various useful, semantically structured and ready to embed 
 - Methods must have a comment with a short, precise and concise description.
 - Methods parameters should be type-hinted and have description.
 - DontRepeatYourself - avoid to code duplication across modules - reuse already logic from existed modules if possible.
-- To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description. 
+- To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description.
+- The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
 
 #### CLI Integration
 - Tool can be used from terminal by-default.
@@ -35,17 +36,17 @@ The project contains various useful, semantically structured and ready to embed 
 - Methods to expose to CLI should be visible scope and decorated as `@cli.command()`.
 
 ### CLI component
-`cli.py` is an adapter between CLI and modules.
+`./lib/cli.py` is an adapter between CLI and modules.
 
 #### Methods to CLI translation scheme
-- Expose only methods decorated as `@cli.command()`.
+- Expose only methods decorated as `@lib.cli.command()`.
 - Methods translated to command modes/operations.
 - Method parameters translated to mode/operation argument or options.
 - Method and parameters comments, type-hints, default-values translated to corresponding methods/options.
 - Errors and exceptions translated to stderr and exit code.
 
 ##### Default command
-Method decorated with `@cli.command(default=True)` not required explicit passing of corresponded mode/operation name.
+Method decorated with `@lib.cli.command(default=True)` not required explicit passing of corresponded mode/operation name.
 When multiple commands are marked `default=True`, the CLI picks the best match by comparing how many positional arguments each function signature can consume from `argv`.
 This allows transparent dispatch: `./script.py eth0` can resolve to `show(iface="eth0")` even though `show` is not explicitly named.
 
@@ -60,7 +61,7 @@ Arguments are parsed from the command function signature:
 - `*args` variadic parameter → collects remaining positional arguments after required ones
 
 ##### Output
-Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serialises the return value:
+Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serializes the return value:
 - **Dict** → aligned `key: value` (bold keys)
 - **List of dicts** → aligned table (bold headers)
 - **Errors** → plain text to stderr (no JSON)
@@ -191,18 +192,14 @@ def show(name: str, *fields: Literal["a", "b", "c"]) -> dict:
 Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
 
 ### Shebang and Executable Permissions
-The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`). This allows running the script directly as `./script.py` without explicitly invoking an interpreter.
+The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`). 
+This allows running the script directly as `./script.py` without explicitly invoking an interpreter.
 
 ### Missing arguments → help
 When required positional arguments are missing, the CLI shows the error followed by usage.
 
 ### Scope
 An endpoint does exactly what its name implies — no extra features, commands, or modes beyond the stated purpose. Resist feature creep.
-
-### Reuse
-Don't duplicate code. Reuse existing endpoints by importing their module and calling functions directly. Check the list of existing endpoints in ./REGISTRY.md before starting.
-
-Within an endpoint, extract shared logic into private (`_`) functions rather than duplicating code between commands.
 
 ### Registry
 Maintain a list of existing endpoints in the REGISTRY.md file — add entries when creating new ones and changing existing ones. Format: one line — `name — short description`.
