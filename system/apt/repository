@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import distro
 import re
 import sys
 import urllib.request
@@ -97,6 +98,9 @@ _OFFICIAL_HOSTS = {
     "security.ubuntu.com",
     "us.archive.ubuntu.com",
 }
+
+# Standard APT suite aliases — not tied to any specific distro
+_ALIASES = {"stable", "testing", "unstable", "oldstable", "sid", "experimental", "devel"}
 
 
 def _is_official_repo(url: str) -> bool:
@@ -224,7 +228,15 @@ def summary() -> list[dict]:
         pinned, pin_priority = _match_pin(url, pins)
 
         # discover all branches from dists/ for official repos
+        # filter to current codename + suffixes + standard suite aliases
+        codename = distro.codename()
         available = _fetch_dists(url) if _is_official_repo(url) else []
+        available = [
+            b for b in available
+            if b == codename
+            or b.startswith(f"{codename}-")
+            or b in _ALIASES
+        ]
 
         if available:
             for branch in sorted(available):
