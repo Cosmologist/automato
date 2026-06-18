@@ -346,6 +346,17 @@ def activate(
 
     url = url.rstrip("/")
 
+    if pin_priority is None and components:
+        *rest, last = components
+        if last == "fallback":
+            components, pin_priority = tuple(rest), last
+        else:
+            try:
+                int(last)
+                components, pin_priority = tuple(rest), last
+            except ValueError:
+                pass
+
     if not components:
         components = tuple(_list_components(suite, url))
 
