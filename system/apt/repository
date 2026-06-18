@@ -339,7 +339,7 @@ def activate(
         suite: Suite name (e.g. unstable, trixie, noble)
         url: Repository base URL (without /dists/…). Auto-detected if not given
         components: Component names (e.g. main, contrib). All available if not given
-        pin_priority: Pin priority value or "fallback" for auto-detected lowest priority
+        pin_priority: Pin priority value or "smallest" for auto-detected lowest priority
     """
     if url is None:
         url = _resolve_suite_url(suite)
@@ -395,13 +395,13 @@ def activate(
     if pin_priority is not None:
         hostname = _hostname_from_url(url)
 
-        if pin_priority == "fallback":
+        if pin_priority == "smallest":
             priority = _compute_fallback_priority()
         else:
             try:
                 priority = int(pin_priority)
             except ValueError:
-                raise ValueError(f"Invalid pin-priority value: '{pin_priority}'. Must be a number or 'fallback'.")
+                raise ValueError(f"Invalid pin-priority value: '{pin_priority}'. Must be a number or 'smallest'.")
 
         pin_dir = Path("/etc/apt/preferences.d")
         pin_dir.mkdir(parents=True, exist_ok=True)
