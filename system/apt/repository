@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import distro
 import re
 import sys
 import urllib.request
@@ -219,7 +220,10 @@ def summary() -> list[dict]:
         pinned, pin_priority = _match_pin(url, pins)
 
         # discover all branches from dists/ only for official repos
+        # filter to only branches matching the current distribution codename
+        codename = distro.codename()
         available = _fetch_dists(url) if _is_official_repo(url) else []
+        available = [b for b in available if b == codename or b.startswith(f"{codename}-")]
 
         if available:
             for branch in sorted(available):
