@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import urllib.request
@@ -411,6 +412,52 @@ def activate(
     return result
 
 
+def _color(c: str) -> str:
+    if not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
+        return ""
+    return c
+
+
+_C_RESET = _color("\033[0m")
+_C_NUM = _color("\033[96m")
+_C_URL = _color("\033[94m")
+_C_SUITE = _color("\033[95m")
+_C_ACTIVE = _color("\033[92m")
+_C_INACTIVE = _color("\033[90m")
+_C_PIN = _color("\033[93m")
+
+
+def _format_colored(repos: list[dict]):
+    for i, repo in enumerate(repos, 1):
+        url = repo["url"]
+        suite = repo["suite"]
+        active = repo["active"]
+        pin = repo["pin-priority"]
+        avail = repo["available_components"]
+        active_comps_str = repo["active_components"]
+        active_comps = set(active_comps_str.split(",")) if active_comps_str else set()
+        avail_comps = avail.split(",") if avail else []
+        pin_str = str(pin) if pin is not None else ""
+        comps_raw = " ".join(avail_comps)
+
+        if not active:
+            print(f"{_C_INACTIVE}{i}. {url} {suite} {comps_raw} {pin_str}{_C_RESET}")
+            continue
+
+        comps_parts = []
+        for comp in avail_comps:
+            if comp in active_comps:
+                comps_parts.append(f"{_C_ACTIVE}{comp}{_C_RESET}")
+            else:
+                comps_parts.append(f"{_C_INACTIVE}{comp}{_C_RESET}")
+        comps_str = " ".join(comps_parts)
+
+        line = f"{_C_NUM}{i}.{_C_RESET} {_C_URL}{url}{_C_RESET} {_C_SUITE}{suite}{_C_RESET} {comps_str}"
+        if pin_str:
+            line += f" {_C_PIN}{pin_str}{_C_RESET}"
+        print(line)
+
+
 def main():
     cli = CLI(version="2.2.0", prog=__file__, description="List APT repositories")
 
@@ -418,9 +465,15 @@ def main():
     def summary_cmd() -> list[dict]:
         """Show all APT repositories with all available suites"""
         repos = summary()
-        # double sort: primary by url, secondary by suite
         repos.sort(key=lambda r: (r["url"], r["suite"]))
         return repos
+
+    @cli.command(name="summary")
+    def summary_show() -> None:
+        """Show colored summary of APT repositories"""
+        repos = summary()
+        repos.sort(key=lambda r: (r["url"], r["suite"]))
+        _format_colored(repos)
 
     @cli.command()
     def components(suite: str, url: str | None = None) -> list[str]:
