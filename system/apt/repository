@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import distro
 import re
 import sys
 import urllib.request
@@ -37,6 +36,11 @@ class _DirListParser(HTMLParser):
 def _derive_name(uri: str) -> str:
     """Derive a short name from repository URI."""
     parsed = urlparse(uri)
+
+    # cdrom: sources — non-network, return simple name
+    if parsed.scheme == "cdrom":
+        return "cdrom"
+
     host = parsed.hostname or ""
     path = parsed.path.strip("/")
 
@@ -219,11 +223,8 @@ def summary() -> list[dict]:
         name = _derive_name(url)
         pinned, pin_priority = _match_pin(url, pins)
 
-        # discover all branches from dists/ only for official repos
-        # filter to only branches matching the current distribution codename
-        codename = distro.codename()
+        # discover all branches from dists/ for official repos
         available = _fetch_dists(url) if _is_official_repo(url) else []
-        available = [b for b in available if b == codename or b.startswith(f"{codename}-")]
 
         if available:
             for branch in sorted(available):
