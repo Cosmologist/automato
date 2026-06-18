@@ -504,7 +504,7 @@ def main():
         """
         return _list_components(suite, url)
 
-    @cli.command(name="activate", alias_of=activate)
+    @cli.command(name="add", alias_of=activate)
     def activate_wrap(
         suite: str,
         *components: str,
