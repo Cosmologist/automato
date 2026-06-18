@@ -230,10 +230,26 @@ def summary() -> list[dict]:
         urls.add(entry.uri)
         configured.add((entry.uri, entry.dist))
 
+    # deduplicate by hostname — if multiple URLs share a host, keep the one
+    # with configured entries. Different hostnames = different repos, keep both.
+    host_to_url: dict[str, str] = {}
+    host_has_config: dict[str, bool] = {}
+    for url in sorted(urls):
+        host = urlparse(url).hostname or ""
+        has_config = any((url, d) in configured for _, d in configured)
+        if host in host_to_url:
+            # same host = same repo, keep the configured one
+            if has_config and not host_has_config[host]:
+                host_to_url[host] = url
+                host_has_config[host] = True
+            continue
+        host_to_url[host] = url
+        host_has_config[host] = has_config
+
     repos: list[dict] = []
     seen: set[tuple[str, str]] = set()
 
-    for url in sorted(urls):
+    for host, url in sorted(host_to_url.items()):
         name = _derive_name(url)
         pinned, pin_priority = _match_pin(url, pins)
 
