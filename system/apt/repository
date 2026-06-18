@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import re
 import sys
+import urllib.request
+import urllib.error
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,81 +17,123 @@ from lib.cli import CLI
 import aptsources.sourceslist
 
 
+class _DirListParser(HTMLParser):
+    """Parse Apache/Nginx directory listing HTML to extract folder names."""
+
+    def __init__(self):
+        super().__init__()
+        self.entries: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            for attr, val in attrs:
+                if attr == "href" and val and not val.startswith("?") and not val.startswith("/"):
+                    name = val.rstrip("/")
+                    if name and name != "..":
+                        self.entries.append(name)
+
+
 def _derive_name(uri: str) -> str:
     """Derive a short name from repository URI."""
     parsed = urlparse(uri)
     host = parsed.hostname or ""
     path = parsed.path.strip("/")
 
-    # ppa: launchpadcontent.net/<user>/<repo>/ubuntu → user-repo
     if "launchpad" in host and path:
         parts = [p for p in path.split("/") if p not in ("ubuntu", "ppa")]
         if len(parts) >= 2:
             return f"{parts[0]}-{parts[1]}"
         if parts:
             return parts[0]
-
-    # cursor: downloads.cursor.com/aptrepo → cursor
     if "cursor" in host:
         return "cursor"
-
-    # google chrome: dl.google.com/linux/chrome → google-chrome
     if "google" in host:
         return "google-chrome"
-
-    # docker: download.docker.com/linux/ubuntu → docker
     if "docker" in host:
         return "docker"
-
-    # nodesource: deb.nodesource.com/node_22.x → nodesource
     if "nodesource" in host:
         return "nodesource"
-
-    # archive/security: *.ubuntu.com/ubuntu → ubuntu
     if "ubuntu.com" in host and "ubuntu" in path:
         return "ubuntu"
-
-    # pkg.dev: <host>/projects/<name> → name
     if host.endswith(".pkg.dev") and path.startswith("projects/"):
         parts = path.split("/")
         if len(parts) >= 2:
             return parts[1].rstrip("/")
-
-    # s3 bucket: <name>.s3.<region>.amazonaws.com or <name>.s3.brave.com
     if ".s3." in host:
         bucket = host.split(".s3.")[0]
-        # brave-browser-apt-release → brave
         if bucket.startswith("brave"):
             return "brave"
         return bucket
-
-    # windsurf: windsurf-stable.codeiumdata.com → windsurf
     if "codeiumdata" in host:
         return "windsurf"
-
-    # yandex mirrors: mirror.yandex.ru/mirrors/launchpad/ondrej/php → ondrej-php
     if "yandex" in host and "launchpad" in path:
         parts = path.split("/")
         idx = parts.index("launchpad") if "launchpad" in parts else -1
         if idx >= 0 and idx + 1 < len(parts):
             return "-".join(parts[idx + 1:])
-
-    # debian.griffo.io → griffo
     if host.endswith(".griffo.io"):
         return host.split(".")[-2]
 
-    # generic: use host base name + first meaningful path segment
     skip = {"apt", "repo", "repos", "packages", "stable", "dists", "ubuntu"}
     segments = [s for s in path.split("/") if s and s not in skip]
-
     if host.count(".") >= 2:
         base = host.rsplit(".", 2)[-2]
     else:
         base = host
-
     if segments:
         return f"{base}-{segments[0]}".strip("-")
     return base
+
+
+_OFFICIAL_HOSTS = {
+    "deb.debian.org",
+    "security.debian.org",
+    "archive.ubuntu.com",
+    "security.ubuntu.com",
+    "us.archive.ubuntu.com",
+}
+
+
+def _is_official_repo(url: str) -> bool:
+    """Check if URL belongs to an official Debian/Ubuntu distribution repository."""
+    host = urlparse(url).hostname or ""
+    if host in _OFFICIAL_HOSTS:
+        return True
+    # ftp.us.debian.org, ftp.debian.org, etc.
+    if host.startswith("ftp.") and host.endswith(".debian.org"):
+        return True
+    return False
+
+
+def _fetch_dists(url: str) -> list[str]:
+    """Fetch available distributions from a repository by listing its dists/ directory.
+
+    Returns list of distribution names, or empty list on failure.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return []
+
+    base = url.rstrip("/") + "/dists/"
+    try:
+        req = urllib.request.Request(base, headers={"User-Agent": "apt-repository-list/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status != 200:
+                return []
+            html = resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return []
+
+    parser = _DirListParser()
+    parser.feed(html)
+
+    # filter out non-distribution entries (Release, InRelease, etc.)
+    dists = []
+    for name in parser.entries:
+        if name in ("Release", "InRelease", "Release.gpg", "by-hash"):
+            continue
+        dists.append(name)
+    return dists
 
 
 def _parse_pins() -> list[dict]:
@@ -136,7 +181,6 @@ def _match_pin(uri: str, pins: list[dict]) -> tuple[bool, int | None]:
 
     for p in pins:
         pin_str = p["pin"]
-        # Pin: origin <hostname>
         m = re.match(r"origin\s+(.+)", pin_str, re.IGNORECASE)
         if m and m.group(1).strip().lower() == host.lower():
             return True, p["priority"]
@@ -145,44 +189,79 @@ def _match_pin(uri: str, pins: list[dict]) -> tuple[bool, int | None]:
 
 
 def summary() -> list[dict]:
-    """List all configured APT repositories.
+    """List all APT repositories with all available branches.
+
+    For each configured repository URL, fetches the dists/ directory to discover
+    all available branches (not just the configured ones). Shows configured state
+    and pin information for each branch.
 
     Returns:
-        List of dicts with name, url, branch, pinned, pin-priority.
+        List of dicts with name, url, branch, configured, pinned, pin-priority.
     """
     sl = aptsources.sourceslist.SourcesList(deb822=True)
     pins = _parse_pins()
 
-    repos: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    # collect configured (url, branch) pairs and unique urls
+    configured: set[tuple[str, str]] = set()
+    urls: set[str] = set()
 
     for entry in sl.exploded_list():
         if not entry.type:
             continue
+        urls.add(entry.uri)
+        configured.add((entry.uri, entry.dist))
 
-        key = (entry.uri, entry.dist)
-        if key in seen:
-            continue
-        seen.add(key)
+    repos: list[dict] = []
+    seen: set[tuple[str, str]] = set()
 
-        pinned, pin_priority = _match_pin(entry.uri, pins)
-        repos.append({
-            "name": _derive_name(entry.uri),
-            "url": entry.uri,
-            "branch": entry.dist,
-            "pinned": pinned,
-            "pin-priority": pin_priority,
-        })
+    for url in sorted(urls):
+        name = _derive_name(url)
+        pinned, pin_priority = _match_pin(url, pins)
+
+        # discover all branches from dists/ only for official repos
+        available = _fetch_dists(url) if _is_official_repo(url) else []
+
+        if available:
+            for branch in sorted(available):
+                key = (url, branch)
+                if key in seen:
+                    continue
+                seen.add(key)
+                repos.append({
+                    "name": name,
+                    "url": url,
+                    "branch": branch,
+                    "configured": key in configured,
+                    "pinned": pinned,
+                    "pin-priority": pin_priority,
+                })
+        else:
+            # fallback: show only configured branches for this url
+            for entry in sl.exploded_list():
+                if not entry.type or entry.uri != url:
+                    continue
+                key = (url, entry.dist)
+                if key in seen:
+                    continue
+                seen.add(key)
+                repos.append({
+                    "name": name,
+                    "url": url,
+                    "branch": entry.dist,
+                    "configured": True,
+                    "pinned": pinned,
+                    "pin-priority": pin_priority,
+                })
 
     return repos
 
 
 def main():
-    cli = CLI(version="1.0.0", prog=__file__, description="List APT repositories")
+    cli = CLI(version="1.1.0", prog=__file__, description="List APT repositories")
 
     @cli.command(default=True)
     def summary_cmd() -> list[dict]:
-        """Show all configured APT repositories"""
+        """Show all APT repositories with all available branches"""
         return summary()
 
     cli.run()
