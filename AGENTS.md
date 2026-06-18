@@ -1,60 +1,66 @@
 # Automato — Agent Guide
 The project contains various useful, semantically structured and ready to embed (via pipes or code) tools.
 
+## Common rules
 **Language** - use **English** for all code, comments, commit messages, and documentation.
-**Filesystem Structure**:
-  - `<applicable-domain>/<tool>` - if applicable domain contains only this one tool, example `amneziawg\client`.
-  - `<applicable-domain>/<applicable-subdomin>/<tool>` - if applicable domain contains only this one tool, example `system/network/interface`.  
-  - `app/` is a sandbox for application prototypes (specialized application tasks).
-  - `configure/`, `examples/`, `tools/` - legacy stuff - ignore them.
-  - `lib/` - for internal use, for boilerplates, utils, wrappers etc.   
-**Tool naming** - prefer *entity name* of applicable domain/subdomain.
+
+## Project rules
+
+### Filesystem Structure
+- `<applicable-domain>/<tool>` - if applicable domain contains only this one tool, example `amneziawg\client`.
+- `<applicable-domain>/<applicable-subdomin>/<tool>` - if applicable domain contains only this one tool, example `system/network/interface`.
+
+**Exclusions**:
+* `app/` is a sandbox for application prototypes (specialized application tasks).
+* `configure/`, `examples/`, `tools/` - legacy, ignore them.
+* `lib/` - for internal use, for boilerplate's, utils, wrappers etc.
+
+### Tools
+**Tool naming** - prefer *entity name* of applicable domain/subdomain.  
 **Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed).
 
-### CLI component (composition)
-Endpoints use `CLI` as a **component**, not a base class. Each endpoint defines a `main()` function that:
-1. Creates a `CLI(...)` instance with metadata (`version`, `description`, `prog`)
-2. Registers command functions via `@cli.command(default=True)` (decorator)
-3. Calls `cli.run()` to parse argv, dispatch, and format output
+#### Implementation common requirements
+- Tool is ordinary python module, you can import it and use from python. 
+- Module divides on multiple single-responsibility methods.
+- Methods are environment-agnostic.
+- Methods must have a comment with a short, precise and concise description.
+- Methods parameters should be type-hinted and have description.
+- DontRepeatYourself - avoid to code duplication across modules - reuse already logic from existed modules if possible.
+- To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description. 
 
-```python
-def main():
-    cli = CLI(version="1.0.0", prog=__file__, description="What I do")
+#### CLI Integration
+- Tool can be used from terminal by-default.
+- To keep environment-agnostic requirement satisfaction the CLI integration possible ONLY inside `def main`.
+- Ordinary integration achieved with single-line `CLI(<Short single-line description>, <reference to this module>).run()`.
+- Methods to expose to CLI should be visible scope and decorated as `@cli.command()`.
 
-    @cli.command(default=True)
-    def show(name: str, *fields: Literal["a", "b"]) -> dict:
-        result = cli.exec(["some", "command"])
-        return {"key": "value"}
+### CLI component
+`cli.py` is an adapter between CLI and modules.
 
-    cli.run()
+#### Methods to CLI translation scheme
+- Expose only methods decorated as `@cli.command()`.
+- Methods translated to command modes/operations.
+- Method parameters translated to mode/operation argument or options.
+- Method and parameters comments, type-hints, default-values translated to corresponding methods/options.
+- Errors and exceptions translated to stderr and exit code.
 
-if __name__ == "__main__":
-    main()
-```
+##### Default command
+Method decorated with `@cli.command(default=True)` not required explicit passing of corresponded mode/operation name.
+When multiple commands are marked `default=True`, the CLI picks the best match by comparing how many positional arguments each function signature can consume from `argv`.
+This allows transparent dispatch: `./script.py eth0` can resolve to `show(iface="eth0")` even though `show` is not explicitly named.
 
-The `CLI` instance provides:
-- `exec(cmd, **kwargs)` — wrapper around `subprocess.run` (raises `RuntimeError` on non-zero exit, default `capture_output=True, text=True`)
-- `require_output(cmd, **kwargs)` — like `exec` but also checks stdout is non-empty, returns stripped string
-- `error(msg, show_usage=False)` — prints error and exits
-- `print_opt(name, desc)` — prints `--name` with description aligned at column 16 (handles `\n` multipart descriptions and per-terminal-width wrapping)
+============================================================
+!!!! ОСТАНОВИЛСЯ НА РУЧНОЙ ПЕРЕРАБОТКЕ ДОКУМЕНТА ЗДЕСЬ !!!!!
+============================================================
 
-Use these instead of raw `subprocess.run(...)` or manual `print` to avoid duplicating error handling and formatting logic.
-
-### Default command
-A command registered with `default=True` (or the only registered command) runs when no arguments are given.
-
-When multiple commands are marked `default=True`, the CLI picks the best match by comparing how many positional arguments each function signature can consume from `argv`. This allows transparent dispatch: `./script.py eth0` can resolve to `show(iface="eth0")` even though `show` is not explicitly named.
-
-### Input
+##### Input
 Arguments are parsed from the command function signature:
 - Parameters **without defaults** → positional CLI arguments
 - Parameters **with defaults** → `--name` optional CLI options
 - `*args` variadic parameter → collects remaining positional arguments after required ones
-- Type hints → type conversion (`str`, `int`, `float`, `bool`)
 
-### Output
+##### Output
 Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serialises the return value:
-
 - **Dict** → aligned `key: value` (bold keys)
 - **List of dicts** → aligned table (bold headers)
 - **Errors** → plain text to stderr (no JSON)
@@ -70,7 +76,7 @@ ip       127.0.0.1/8
 gateway  None
 ```
 
-### `--tty` option
+#####  `--tty` option
 Control output formatting:
 
 - `--tty` or `--tty=true` → force formatted output (table with ANSI)
