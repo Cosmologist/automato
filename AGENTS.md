@@ -63,7 +63,7 @@ Arguments are parsed from the command function signature:
 ##### Output
 Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serializes the return value:
 - **Dict** → aligned `key: value` (bold keys)
-- **List of dicts** → aligned table (bold headers)
+- **List of dicts** as single dict multiple time with divider between dicts
 - **Errors** → plain text to stderr (no JSON)
 
 Data lines contain only whitespace between values — no ANSI, no borders.
