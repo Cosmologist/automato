@@ -261,9 +261,11 @@ def summary() -> list[dict]:
     def _get_available(suite_name: str, url: str) -> list[str] | None:
         key = (url, suite_name)
         if key not in _cache_avail:
+            print(f"  fetch  {suite_name:25} {url}", file=sys.stderr)
             try:
                 _cache_avail[key] = _list_components(suite_name, url)
-            except Exception:
+            except Exception as e:
+                print(f"  fetch! {suite_name:25} {url}  [{e}]", file=sys.stderr)
                 _cache_avail[key] = None
         return _cache_avail[key]
 
@@ -366,9 +368,23 @@ def activate(
             break
 
     if not source_exists:
-        source_file = f"/etc/apt/sources.list.d/automato-{suite}.sources"
-        sl.add(type="deb", uri=url, dist=suite, orig_comps=list(components), file=source_file)
-        sl.save()
+        hostname = _hostname_from_url(url)
+        sources_dir = Path("/etc/apt/sources.list.d")
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        source_file = sources_dir / f"{hostname}.sources"
+
+        entry = (
+            f"Types: deb\n"
+            f"URIs: {url}\n"
+            f"Suites: {suite}\n"
+            f"Components: {' '.join(components)}\n"
+        )
+
+        if source_file.exists():
+            with source_file.open("a") as f:
+                f.write(f"\n\n{entry}")
+        else:
+            source_file.write_text(entry)
 
     result: dict = {
         "suite": suite,
@@ -389,7 +405,7 @@ def activate(
 
         pin_dir = Path("/etc/apt/preferences.d")
         pin_dir.mkdir(parents=True, exist_ok=True)
-        pin_file = pin_dir / f"automato-{suite}-{hostname}.pin"
+        pin_file = pin_dir / f"{hostname}.pref"
 
         pins = _parse_pins()
         pin_updated = False
@@ -428,6 +444,15 @@ _C_PIN = _color("\033[93m")
 
 
 def _format_colored(repos: list[dict]):
+    _leg = lambda c, t, d: f"  {c}{t}{_C_RESET}  {d}"
+    print(f"{_leg(_C_NUM, '01', 'line number')}", file=sys.stderr)
+    print(f"{_leg(_C_URL, 'url', 'repository url')}", file=sys.stderr)
+    print(f"{_leg(_C_SUITE, 'suite', 'suite name')}", file=sys.stderr)
+    print(f"{_leg(_C_ACTIVE, 'comp', 'component active')}", file=sys.stderr)
+    print(f"{_leg(_C_INACTIVE, 'comp', 'component not used')}", file=sys.stderr)
+    print(f"{_leg(_C_PIN, '500', 'pin priority')}", file=sys.stderr)
+    print(f"{_leg(_C_INACTIVE, '_', 'inactive repo (no source entry)')}", file=sys.stderr)
+
     for i, repo in enumerate(repos, 1):
         url = repo["url"]
         suite = repo["suite"]
