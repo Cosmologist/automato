@@ -60,6 +60,8 @@ def _derive_name(uri: str) -> str:
     if "nodesource" in host:
         return "nodesource"
     if host.endswith(".debian.org"):
+        if "security" in host:
+            return "debian-security"
         return "debian"
     if "ubuntu.com" in host and "ubuntu" in path:
         return "ubuntu"
