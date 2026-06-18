@@ -221,7 +221,7 @@ def _list_components(suite: str, url: str | None = None) -> list[str]:
     return sorted(components_set)
 
 
-def summary() -> list[dict]:
+def _get_repos_data() -> list[dict]:
     """List all APT repositories with all available suites.
  
     Uses distribution template metadata to discover official repositories
@@ -261,11 +261,10 @@ def summary() -> list[dict]:
     def _get_available(suite_name: str, url: str) -> list[str] | None:
         key = (url, suite_name)
         if key not in _cache_avail:
-            print(f"  fetch  {suite_name:25} {url}", file=sys.stderr)
+            print(f"  Start fetch components from {url}", file=sys.stderr)
             try:
                 _cache_avail[key] = _list_components(suite_name, url)
-            except Exception as e:
-                print(f"  fetch! {suite_name:25} {url}  [{e}]", file=sys.stderr)
+            except Exception:
                 _cache_avail[key] = None
         return _cache_avail[key]
 
@@ -487,16 +486,9 @@ def main():
     cli = CLI(version="2.2.0", prog=__file__, description="List APT repositories")
 
     @cli.command(default=True)
-    def summary_cmd() -> list[dict]:
-        """Show all APT repositories with all available suites"""
-        repos = summary()
-        repos.sort(key=lambda r: (r["url"], r["suite"]))
-        return repos
-
-    @cli.command(name="summary")
-    def summary_show() -> None:
+    def summary() -> None:
         """Show colored summary of APT repositories"""
-        repos = summary()
+        repos = _get_repos_data()
         repos.sort(key=lambda r: (r["url"], r["suite"]))
         _format_colored(repos)
 
