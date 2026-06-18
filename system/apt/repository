@@ -261,7 +261,8 @@ def _get_repos_data() -> list[dict]:
     def _get_available(suite_name: str, url: str) -> list[str] | None:
         key = (url, suite_name)
         if key not in _cache_avail:
-            print(f"  Start fetch components from {url}", file=sys.stderr)
+            release_url = f"{url.rstrip('/')}/dists/{suite_name}/Release"
+            print(f"Start fetch components from {release_url}", file=sys.stderr)
             try:
                 _cache_avail[key] = _list_components(suite_name, url)
             except Exception:
@@ -443,14 +444,17 @@ _C_PIN = _color("\033[93m")
 
 
 def _format_colored(repos: list[dict]):
-    _leg = lambda c, t, d: f"  {c}{t}{_C_RESET}  {d}"
-    print(f"{_leg(_C_NUM, '01', 'line number')}", file=sys.stderr)
-    print(f"{_leg(_C_URL, 'url', 'repository url')}", file=sys.stderr)
-    print(f"{_leg(_C_SUITE, 'suite', 'suite name')}", file=sys.stderr)
-    print(f"{_leg(_C_ACTIVE, 'comp', 'component active')}", file=sys.stderr)
-    print(f"{_leg(_C_INACTIVE, 'comp', 'component not used')}", file=sys.stderr)
-    print(f"{_leg(_C_PIN, '500', 'pin priority')}", file=sys.stderr)
-    print(f"{_leg(_C_INACTIVE, '_', 'inactive repo (no source entry)')}", file=sys.stderr)
+    print(file=sys.stderr)
+    print("Used colors", file=sys.stderr)
+    print("———————-", file=sys.stderr)
+    print(f"{_C_NUM}line number{_C_RESET}", file=sys.stderr)
+    print(f"{_C_URL}repository url{_C_RESET}", file=sys.stderr)
+    print(f"{_C_SUITE}suite name{_C_RESET}", file=sys.stderr)
+    print(f"{_C_ACTIVE}component active{_C_RESET}", file=sys.stderr)
+    print(f"{_C_INACTIVE}component not used{_C_RESET}", file=sys.stderr)
+    print(f"{_C_PIN}pin priority{_C_RESET}", file=sys.stderr)
+    print(f"{_C_INACTIVE}inactive repo (no source entry){_C_RESET}", file=sys.stderr)
+    print(file=sys.stderr)
 
     for i, repo in enumerate(repos, 1):
         url = repo["url"]
