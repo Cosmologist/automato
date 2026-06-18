@@ -3,12 +3,9 @@
 
 from __future__ import annotations
 
-import distro
 import re
 import sys
 import urllib.request
-import urllib.error
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -16,76 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.cli import CLI
 
 import aptsources.sourceslist
-
-
-class _DirListParser(HTMLParser):
-    """Parse Apache/Nginx directory listing HTML to extract folder names."""
-
-    def __init__(self):
-        super().__init__()
-        self.entries: list[str] = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "a":
-            for attr, val in attrs:
-                if attr == "href" and val and not val.startswith("?") and not val.startswith("/"):
-                    name = val.rstrip("/")
-                    if name and name != "..":
-                        self.entries.append(name)
-
-
-_OFFICIAL_HOSTS = {
-    "deb.debian.org",
-    "security.debian.org",
-    "archive.ubuntu.com",
-    "security.ubuntu.com",
-    "us.archive.ubuntu.com",
-}
+from aptsources.distro import get_distro
 
 # Standard APT suite aliases — not tied to any specific distro
 _ALIASES = {"stable", "testing", "unstable", "oldstable", "sid", "experimental", "devel"}
-
-
-def _is_official_repo(url: str) -> bool:
-    """Check if URL belongs to an official Debian/Ubuntu distribution repository."""
-    host = urlparse(url).hostname or ""
-    if host in _OFFICIAL_HOSTS:
-        return True
-    # ftp.us.debian.org, ftp.debian.org, etc.
-    if host.startswith("ftp.") and host.endswith(".debian.org"):
-        return True
-    return False
-
-
-def _fetch_dists(url: str) -> list[str]:
-    """Fetch available distributions from a repository by listing its dists/ directory.
-
-    Returns list of distribution names, or empty list on failure.
-    """
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return []
-
-    base = url.rstrip("/") + "/dists/"
-    try:
-        req = urllib.request.Request(base, headers={"User-Agent": "apt-repository-list/1.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            if resp.status != 200:
-                return []
-            html = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, TimeoutError):
-        return []
-
-    parser = _DirListParser()
-    parser.feed(html)
-
-    # filter out non-distribution entries (Release, InRelease, etc.)
-    dists = []
-    for name in parser.entries:
-        if name in ("Release", "InRelease", "Release.gpg", "by-hash"):
-            continue
-        dists.append(name)
-    return dists
 
 
 def _parse_pins() -> list[dict]:
@@ -140,82 +71,214 @@ def _match_pin(uri: str, pins: list[dict]) -> tuple[bool, int | None]:
     return False, None
 
 
-def summary() -> list[dict]:
-    """List all APT repositories with all available branches.
+def _url_matches_template(url: str, tmpl) -> bool:
+    """Check if a URL matches a template's base_uri or match_uri pattern.
 
-    For each configured repository URL, fetches the dists/ directory to discover
-    all available branches (not just the configured ones). Shows in-use state
-    and pin priority for each branch.
+    Handles exact base_uri matches as well as mirror URL matching via
+    the template's match_uri regex pattern.
+    """
+    url_norm = url.rstrip("/")
+
+    tmpl_uri = tmpl.base_uri
+    if not tmpl_uri and tmpl.parents:
+        tmpl_uri = tmpl.parents[0].base_uri
+    if tmpl_uri and url_norm == tmpl_uri.rstrip("/"):
+        return True
+    if tmpl.match_uri and re.search(tmpl.match_uri, url):
+        return True
+
+    return False
+
+
+def _get_official_suites(sl, os_distro) -> dict[str, set[str]]:
+    """Build a map of base_uri -> suite names from distribution templates.
+
+    Uses the distribution's template metadata to discover all official
+    suites (release, updates, security, etc.) without hardcoding any
+    distribution-specific values.
+    """
+    codename = os_distro.codename
+    suites_by_uri: dict[str, set[str]] = {}
+
+    for tmpl in sl.matcher.templates:
+        if tmpl.distribution != os_distro.id or not tmpl.official:
+            continue
+        if not (tmpl.name == codename or tmpl.name.startswith(f"{codename}-") or tmpl.name in _ALIASES):
+            continue
+
+        uri = tmpl.base_uri
+        if not uri and tmpl.parents:
+            uri = tmpl.parents[0].base_uri
+        if not uri:
+            continue
+
+        uri = uri.rstrip("/")
+        suites_by_uri.setdefault(uri, set()).add(tmpl.name)
+
+    return suites_by_uri
+
+
+def _resolve_suite_url(suite: str) -> str:
+    """Find the repository URL for a given suite.
+
+    Uses template metadata and configured sources to discover which
+    repository provides the given suite. Errors if not found or ambiguous.
 
     Returns:
-        List of dicts with branch, url, in-use, pin-priority.
+        Repository base URL (without /dists/… suffix).
+
+    Raises:
+        ValueError: suite not found or found in multiple repositories.
+    """
+    sl = aptsources.sourceslist.SourcesList(deb822=True)
+    os_distro = get_distro()
+    os_distro.get_sources(sl)
+    suites_by_uri = _get_official_suites(sl, os_distro)
+
+    candidates: set[str] = set()
+
+    for uri, suites in suites_by_uri.items():
+        if suite in suites:
+            candidates.add(uri)
+
+    for entry in sl.exploded_list():
+        if not entry.type or not entry.uri:
+            continue
+        if not entry.uri.startswith(("http://", "https://")):
+            continue
+        if entry.dist == suite:
+            candidates.add(entry.uri)
+
+    if not candidates:
+        raise ValueError(f"Suite '{suite}' not found in any known repository")
+    if len(candidates) > 1:
+        raise ValueError(f"Suite '{suite}' is ambiguous — found in multiple repositories: {', '.join(sorted(candidates))}")
+
+    return candidates.pop()
+
+
+def _list_components(suite: str, url: str | None = None) -> list[str]:
+    """List components available for a given suite in a repository.
+
+    Fetches the Release file from the repository and extracts the
+    Components field.
+
+    Args:
+        suite: Suite name (e.g. unstable, trixie, noble).
+        url: Repository base URL (without /dists/…). Auto-detected if not given.
+
+    Returns:
+        Sorted list of component names (e.g. main, contrib, non-free).
+    """
+    if url is None:
+        url = _resolve_suite_url(suite)
+
+    release_url = f"{url.rstrip('/')}/dists/{suite}/Release"
+
+    try:
+        with urllib.request.urlopen(release_url, timeout=10) as resp:
+            content = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch Release file from {release_url}: {e}")
+
+    components_set: set[str] = set()
+    for line in content.splitlines():
+        line_s = line.strip()
+        if line_s.startswith("Components:"):
+            parts = line_s.split(":", 1)[1].strip()
+            for comp in parts.split():
+                components_set.add(comp)
+            break
+
+    if not components_set:
+        raise ValueError(f"No Components field found in Release file at {release_url}")
+
+    return sorted(components_set)
+
+
+def summary() -> list[dict]:
+    """List all APT repositories with all available suites.
+ 
+    Uses distribution template metadata to discover official repositories
+    and their suites dynamically, without hardcoding any distribution-
+    specific values.
+ 
+    Returns:
+        List of dicts with suite, url, active_components, available_components,
+        active, pin-priority.
     """
     sl = aptsources.sourceslist.SourcesList(deb822=True)
     pins = _parse_pins()
 
-    # collect configured (url, branch) pairs and unique urls
+    os_distro = get_distro()
+    os_distro.get_sources(sl)
+
+    suites_by_uri = _get_official_suites(sl, os_distro)
+
     configured: set[tuple[str, str]] = set()
     urls: set[str] = set()
+    components_by_key: dict[tuple[str, str], set[str]] = {}
 
     for entry in sl.exploded_list():
-        if not entry.type:
+        if not entry.type or not entry.uri:
             continue
-        # skip non-network sources (cdrom, etc.)
-        if not entry.uri or not entry.uri.startswith(("http://", "https://")):
-            continue
-        # only show official distribution repos
-        if not _is_official_repo(entry.uri):
+        if not entry.uri.startswith(("http://", "https://")):
             continue
         urls.add(entry.uri)
         configured.add((entry.uri, entry.dist))
-
-    # deduplicate by hostname — if multiple URLs share a host, keep the one
-    # with configured entries. Different hostnames = different repos, keep both.
-    host_to_url: dict[str, str] = {}
-    host_has_config: dict[str, bool] = {}
-    for url in sorted(urls):
-        host = urlparse(url).hostname or ""
-        has_config = any((url, d) in configured for _, d in configured)
-        if host in host_to_url:
-            # same host = same repo, keep the configured one
-            if has_config and not host_has_config[host]:
-                host_to_url[host] = url
-                host_has_config[host] = True
-            continue
-        host_to_url[host] = url
-        host_has_config[host] = has_config
+        if entry.comps:
+            components_by_key.setdefault((entry.uri, entry.dist), set()).update(entry.comps)
 
     repos: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    _cache_avail: dict[tuple[str, str], list[str] | None] = {}
 
-    for host, url in sorted(host_to_url.items()):
+    def _get_available(suite_name: str, url: str) -> list[str] | None:
+        key = (url, suite_name)
+        if key not in _cache_avail:
+            try:
+                _cache_avail[key] = _list_components(suite_name, url)
+            except Exception:
+                _cache_avail[key] = None
+        return _cache_avail[key]
+
+    for url in sorted(urls):
         _, pin_priority = _match_pin(url, pins)
 
-        # discover all branches from dists/ for official repos
-        # filter to current codename + suffixes + standard suite aliases
-        codename = distro.codename()
-        available = _fetch_dists(url) if _is_official_repo(url) else []
-        available = [
-            b for b in available
-            if b == codename
-            or b.startswith(f"{codename}-")
-            or b in _ALIASES
-        ]
+        official_suites: set[str] | None = None
+        url_norm = url.rstrip("/")
 
-        if available:
-            for branch in sorted(available):
-                key = (url, branch)
+        if url_norm in suites_by_uri:
+            official_suites = suites_by_uri[url_norm]
+        else:
+            for tmpl in sl.matcher.templates:
+                if tmpl.distribution != os_distro.id or not tmpl.official:
+                    continue
+                if _url_matches_template(url, tmpl):
+                    uri = tmpl.base_uri
+                    if not uri and tmpl.parents:
+                        uri = tmpl.parents[0].base_uri
+                    if uri:
+                        official_suites = suites_by_uri.get(uri.rstrip("/"))
+                        break
+
+        if official_suites:
+            for suite_name in sorted(official_suites):
+                key = (url, suite_name)
                 if key in seen:
                     continue
                 seen.add(key)
+                comps = components_by_key.get(key, set())
+                avail = _get_available(suite_name, url)
                 repos.append({
-                    "branch": branch,
+                    "suite": suite_name,
                     "url": url,
-                    "in-use": key in configured,
+                    "active_components": ",".join(sorted(comps)) if comps else None,
+                    "available_components": ",".join(avail) if avail else None,
+                    "active": key in configured,
                     "pin-priority": pin_priority,
                 })
         else:
-            # fallback: show only configured branches for this url
             for entry in sl.exploded_list():
                 if not entry.type or entry.uri != url:
                     continue
@@ -223,10 +286,14 @@ def summary() -> list[dict]:
                 if key in seen:
                     continue
                 seen.add(key)
+                comps = entry.comps or []
+                avail = _get_available(entry.dist, url)
                 repos.append({
-                    "branch": entry.dist,
+                    "suite": entry.dist,
                     "url": url,
-                    "in-use": True,
+                    "active_components": ",".join(sorted(comps)) if comps else None,
+                    "available_components": ",".join(avail) if avail else None,
+                    "active": True,
                     "pin-priority": pin_priority,
                 })
 
@@ -234,15 +301,25 @@ def summary() -> list[dict]:
 
 
 def main():
-    cli = CLI(version="1.2.0", prog=__file__, description="List APT repositories")
+    cli = CLI(version="2.2.0", prog=__file__, description="List APT repositories")
 
     @cli.command(default=True)
     def summary_cmd() -> list[dict]:
-        """Show all APT repositories with all available branches"""
+        """Show all APT repositories with all available suites"""
         repos = summary()
-        # double sort: primary by url, secondary by branch
-        repos.sort(key=lambda r: (r["url"], r["branch"]))
+        # double sort: primary by url, secondary by suite
+        repos.sort(key=lambda r: (r["url"], r["suite"]))
         return repos
+
+    @cli.command()
+    def components(suite: str, url: str | None = None) -> list[str]:
+        """List components available for a given suite in a repository
+
+        Args:
+            suite: Suite name
+            url: Repository base URL
+        """
+        return _list_components(suite, url)
 
     cli.run()
 
