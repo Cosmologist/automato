@@ -59,6 +59,8 @@ def _derive_name(uri: str) -> str:
         return "docker"
     if "nodesource" in host:
         return "nodesource"
+    if host.endswith(".debian.org"):
+        return "debian"
     if "ubuntu.com" in host and "ubuntu" in path:
         return "ubuntu"
     if host.endswith(".pkg.dev") and path.startswith("projects/"):
@@ -219,6 +221,9 @@ def summary() -> list[dict]:
             continue
         # skip non-network sources (cdrom, etc.)
         if not entry.uri or not entry.uri.startswith(("http://", "https://")):
+            continue
+        # only show official distribution repos
+        if not _is_official_repo(entry.uri):
             continue
         urls.add(entry.uri)
         configured.add((entry.uri, entry.dist))
