@@ -217,6 +217,9 @@ def summary() -> list[dict]:
     for entry in sl.exploded_list():
         if not entry.type:
             continue
+        # skip non-network sources (cdrom, etc.)
+        if not entry.uri or not entry.uri.startswith(("http://", "https://")):
+            continue
         urls.add(entry.uri)
         configured.add((entry.uri, entry.dist))
 
