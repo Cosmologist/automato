@@ -55,6 +55,14 @@ def _parse_pins() -> list[dict]:
     return pins
 
 
+def _hostname_from_url(url: str) -> str:
+    """Extract hostname from a repository URL for pin matching."""
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        raise ValueError(f"Cannot extract hostname from URL: {url}")
+    return parsed.hostname
+
+
 def _match_pin(uri: str, pins: list[dict]) -> tuple[bool, int | None]:
     """Check if any pin rule matches the given URI by origin hostname."""
     parsed = urlparse(uri)
@@ -69,6 +77,22 @@ def _match_pin(uri: str, pins: list[dict]) -> tuple[bool, int | None]:
             return True, p["priority"]
 
     return False, None
+
+
+def _compute_fallback_priority() -> int:
+    """Compute fallback pin-priority as the lowest existing priority divisible by 100, 10, or 2, divided by 2."""
+    pins = _parse_pins()
+    if not pins:
+        raise ValueError("No existing pin priorities found in the system")
+
+    priorities = sorted(set(p["priority"] for p in pins))
+
+    for divisor in (100, 10, 2):
+        candidates = [p for p in priorities if p % divisor == 0]
+        if candidates:
+            return candidates[0] // 2
+
+    raise ValueError("No existing pin priority is divisible by 100, 10, or 2")
 
 
 def _url_matches_template(url: str, tmpl) -> bool:
@@ -300,6 +324,93 @@ def summary() -> list[dict]:
     return repos
 
 
+def activate(
+    suite: str,
+    *components: str,
+    url: str | None = None,
+    pin_priority: str | None = None,
+) -> dict:
+    """Activate a repository source entry and optional pin
+
+    Args:
+        suite: Suite name (e.g. unstable, trixie, noble)
+        url: Repository base URL (without /dists/…). Auto-detected if not given
+        components: Component names (e.g. main, contrib). All available if not given
+        pin_priority: Pin priority value or "fallback" for auto-detected lowest priority
+    """
+    if url is None:
+        url = _resolve_suite_url(suite)
+
+    url = url.rstrip("/")
+
+    if not components:
+        components = tuple(_list_components(suite, url))
+
+    sl = aptsources.sourceslist.SourcesList(deb822=True)
+
+    source_exists = False
+    for entry in sl:
+        if not entry.uri or not entry.dist:
+            continue
+        if entry.uri.rstrip("/") == url and entry.dist == suite:
+            existing_comps = set(entry.comps or [])
+            requested_comps = set(components)
+            if existing_comps != requested_comps:
+                raise ValueError(
+                    f"Repository '{suite}' at '{url}' already exists "
+                    f"with components: {','.join(sorted(existing_comps))}. "
+                    f"Requested: {','.join(sorted(requested_comps))}."
+                )
+            source_exists = True
+            break
+
+    if not source_exists:
+        source_file = f"/etc/apt/sources.list.d/automato-{suite}.sources"
+        sl.add(type="deb", uri=url, dist=suite, orig_comps=list(components), file=source_file)
+        sl.save()
+
+    result: dict = {
+        "suite": suite,
+        "url": url,
+        "components": ",".join(components),
+    }
+
+    if pin_priority is not None:
+        hostname = _hostname_from_url(url)
+
+        if pin_priority == "fallback":
+            priority = _compute_fallback_priority()
+        else:
+            try:
+                priority = int(pin_priority)
+            except ValueError:
+                raise ValueError(f"Invalid pin-priority value: '{pin_priority}'. Must be a number or 'fallback'.")
+
+        pin_dir = Path("/etc/apt/preferences.d")
+        pin_dir.mkdir(parents=True, exist_ok=True)
+        pin_file = pin_dir / f"automato-{suite}-{hostname}.pin"
+
+        pins = _parse_pins()
+        pin_updated = False
+        for p in pins:
+            pin_str = p["pin"]
+            m = re.match(r"origin\s+(.+)", pin_str, re.IGNORECASE)
+            if m and m.group(1).strip().lower() == hostname.lower():
+                if p["priority"] != priority:
+                    pin_file.write_text(f"Package: *\nPin: origin {hostname}\nPin-Priority: {priority}\n")
+                pin_updated = True
+                break
+
+        if not pin_updated:
+            pin_file.write_text(f"Package: *\nPin: origin {hostname}\nPin-Priority: {priority}\n")
+
+        result["pin-priority"] = str(priority)
+    else:
+        result["pin-priority"] = ""
+
+    return result
+
+
 def main():
     cli = CLI(version="2.2.0", prog=__file__, description="List APT repositories")
 
@@ -320,6 +431,15 @@ def main():
             url: Repository base URL
         """
         return _list_components(suite, url)
+
+    @cli.command(name="activate", alias_of=activate)
+    def activate_wrap(
+        suite: str,
+        *components: str,
+        url: str | None = None,
+        pin_priority: str | None = None,
+    ) -> dict:
+        return activate(suite, *components, url=url, pin_priority=pin_priority)
 
     cli.run()
 

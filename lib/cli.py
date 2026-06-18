@@ -49,11 +49,12 @@ class CLI:
         self._tty: bool | None = None
         self._commands: dict[str, dict] = {}
 
-    def command(self, fn=None, *, name=None, default=False):
+    def command(self, fn=None, *, name=None, default=False, alias_of=None):
         if fn is None:
-            return lambda f: self.command(f, name=name, default=default)
+            return lambda f: self.command(f, name=name, default=default, alias_of=alias_of)
         cmd_name = name or fn.__name__
-        self._commands[cmd_name] = {"fn": fn, "default": default}
+        source = alias_of or fn
+        self._commands[cmd_name] = {"fn": fn, "default": default, "source": source}
         return fn
 
     def run(self):
@@ -86,7 +87,7 @@ class CLI:
         entry = self._commands.get(cmd)
 
         if entry:
-            self._execute(entry["fn"], argv[1:])
+            self._execute(entry, argv[1:])
         else:
             self._run_best_default(commands, argv)
 
@@ -133,25 +134,26 @@ class CLI:
     # -- introspection --
 
     def _get_commands(self):
-        return [(name, entry["fn"]) for name, entry in self._commands.items()]
+        return [(name, entry) for name, entry in self._commands.items()]
 
     def _get_default(self, commands):
-        for name, fn in commands:
+        for name, entry in commands:
             if self._commands[name]["default"]:
-                return name, fn
+                return name, entry
         return commands[0] if commands else None
 
     def _run_best_default(self, commands, argv):
         defaults = [
-            (n, m)
-            for n, m in commands
+            (n, e)
+            for n, e in commands
             if self._commands[n]["default"]
         ] or commands[:1]
 
         best = None
         best_score = -1
-        for name, method in defaults:
-            sig = inspect.signature(method)
+        for name, entry in defaults:
+            source = entry.get("source", entry["fn"])
+            sig = inspect.signature(source)
             pos_count = len(
                 [
                     p
@@ -162,7 +164,7 @@ class CLI:
             score = min(len(argv), pos_count)
             if score > best_score:
                 best_score = score
-                best = (name, method)
+                best = (name, entry)
 
         if best:
             self._execute(best[1], argv)
@@ -260,20 +262,24 @@ class CLI:
         commands = self._get_commands()
 
         if len(commands) == 1:
-            _, method = commands[0]
-            usage_args = self._usage_args(method)
+            _, entry = commands[0]
+            source = entry.get("source", entry["fn"])
+            usage_args = self._usage_args(source)
             print(f"Usage: {_S['bold']}{_S['cyan']}{prog}{_S['reset']} {usage_args} {self._cli_opts()}", file=sys.stderr)
         else:
             print(f"Usage: {_S['bold']}{_S['cyan']}{prog}{_S['reset']} <{_S['bold']}{_S['cyan']}command{_S['reset']}> [args...] {self._cli_opts()}", file=sys.stderr)
-            for name, method in commands:
-                usage = f"{prog} {name} {self._usage_args(method)}".rstrip()
-                print(f"  {_S['bold']}{_S['cyan']}{name:<16}{_S['reset']} {self._doc_first(method)}", file=sys.stderr)
+            for name, entry in commands:
+                source = entry.get("source", entry["fn"])
+                usage = f"{prog} {name} {self._usage_args(source)}".rstrip()
+                print(f"  {_S['bold']}{_S['cyan']}{name:<16}{_S['reset']} {self._doc_first(source)}", file=sys.stderr)
                 print(f"    {_S['dim']}{usage}{_S['reset']}", file=sys.stderr)
         print("\u2500" * min(cols, 80), file=sys.stderr)
 
-    def _execute(self, method, argv):
-        sig = inspect.signature(method)
-        hints = get_type_hints(method)
+    def _execute(self, entry, argv):
+        source = entry.get("source", entry["fn"])
+        fn = entry["fn"]
+        sig = inspect.signature(source)
+        hints = get_type_hints(source)
         params = list(sig.parameters.values())
 
         var_param = None
@@ -291,7 +297,7 @@ class CLI:
             self._print_header()
 
         if argv and argv[0] in ("--help", "-h"):
-            self._command_help(method, positional, optional, var_param)
+            self._command_help(source, positional, optional, var_param)
             return
 
         pos_values = []
@@ -301,7 +307,7 @@ class CLI:
             i += 1
 
         if not var_param and len(pos_values) > len(positional) + len(optional):
-            self.error(f"Too many arguments for '{method.__name__}'", show_usage=True)
+            self.error(f"Too many arguments for '{source.__name__}'", show_usage=True)
 
         kwargs = {}
         while i < len(argv):
@@ -364,15 +370,15 @@ class CLI:
 
         try:
             if var_param:
-                result = method(*pos_args, **kwargs)
+                result = fn(*pos_args, **kwargs)
             else:
-                result = method(*pos_args, **kw_args)
+                result = fn(*pos_args, **kw_args)
         except Exception as e:
             self.error(str(e), show_usage=True)
             return
 
         if result is not None:
-            self._output(result, method)
+            self._output(result, fn)
 
     def _output(self, result, method):
         plain = self._tty is False or (self._tty is None and not sys.stdout.isatty())
@@ -415,18 +421,13 @@ class CLI:
             if not result:
                 return
             if isinstance(result[0], dict):
-                keys = list(dict.fromkeys(k for d in result for k in d))
-                rows = [
-                    [str(d.get(k, "")) if d.get(k) is not None else "" for k in keys]
-                    for d in result
-                ]
-                widths = [
-                    max(len(k), *(len(r[i]) for r in rows))
-                    for i, k in enumerate(keys)
-                ]
-                print(" ".join(f"{_S['bold']}{k}{_S['reset']}{' ' * (w - len(k))}" for k, w in zip(keys, widths)))
-                for row in rows:
-                    print(" ".join(v.ljust(w) for v, w in zip(row, widths)))
+                for i, d in enumerate(result):
+                    if i > 0:
+                        print("---")
+                    pad = max(len(k) for k in d) + 2
+                    for k, v in d.items():
+                        val = str(v) if v is not None else ""
+                        print(f"{_S['bold']}{k}{_S['reset']}{' ' * (pad - len(k))}{val}")
             else:
                 for item in result:
                     print(item)
@@ -455,11 +456,12 @@ class CLI:
         prog = self._prog
 
         if len(commands) == 1:
-            _, method = commands[0]
+            _, entry = commands[0]
+            source = entry.get("source", entry["fn"])
             labels = self._arg_labels
-            hints = get_type_hints(method)
+            hints = get_type_hints(source)
 
-            sig = inspect.signature(method)
+            sig = inspect.signature(source)
             positional = [p for p in sig.parameters.values() if p.default is inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
             var_param = next((p for p in sig.parameters.values() if p.kind == inspect.Parameter.VAR_POSITIONAL), None)
             optional = [p for p in sig.parameters.values() if p.default is not inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
@@ -467,7 +469,7 @@ class CLI:
             if positional:
                 print("ARGUMENTS:", file=sys.stderr)
                 for p in positional:
-                    d = self._param_doc(method, p.name)
+                    d = self._param_doc(source, p.name)
                     label = labels.get(p.name, p.name)
                     choices = _literal_choices(hints.get(p.name))
                     if choices:
@@ -476,7 +478,7 @@ class CLI:
                 print(file=sys.stderr)
             if var_param:
                 print("FIELDS:", file=sys.stderr)
-                d = self._param_doc(method, var_param.name)
+                d = self._param_doc(source, var_param.name)
                 label = labels.get(var_param.name, var_param.name)
                 choices = _literal_choices(hints.get(var_param.name))
                 if choices:
@@ -485,10 +487,11 @@ class CLI:
                 print(file=sys.stderr)
         else:
             print("COMMANDS:", file=sys.stderr)
-            for name, method in commands:
-                doc = method.__doc__
+            for name, entry in commands:
+                source = entry.get("source", entry["fn"])
+                doc = source.__doc__
                 d = doc.strip().split("\n")[0] if doc else ""
-                args = self._usage_args(method)
+                args = self._usage_args(source)
                 print(f"  {_S['bold']}{_S['cyan']}{name:<16}{_S['reset']} {d} {_S['dim']}({prog} {name} {args}){_S['reset']}", file=sys.stderr)
             print(file=sys.stderr)
 
@@ -497,11 +500,12 @@ class CLI:
         tty_desc = "- false \u2014 plain-values output for machines\n- true \u2014 decorated output for humans\n- unset \u2014 automatic selection"
         self.print_opt("tty", tty_desc)
         if len(commands) == 1:
-            _, method = commands[0]
-            sig = inspect.signature(method)
+            _, entry = commands[0]
+            source = entry.get("source", entry["fn"])
+            sig = inspect.signature(source)
             optional = [p for p in sig.parameters.values() if p.default is not inspect.Parameter.empty and p.kind != inspect.Parameter.VAR_POSITIONAL]
             for p in optional:
-                d = self._param_doc(method, p.name)
+                d = self._param_doc(source, p.name)
                 desc = f"  {d}" if d else ""
                 dflt = f" (default: {p.default})"
                 print(f"  {_S['yellow']}--{p.name.replace('_', '-')}{_S['reset']}\t{desc}{dflt}", file=sys.stderr)
