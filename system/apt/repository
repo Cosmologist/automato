@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""List APT repositories"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.cli import CLI
+
+import aptsources.sourceslist
+
+
+def _derive_name(uri: str) -> str:
+    """Derive a short name from repository URI."""
+    parsed = urlparse(uri)
+    host = parsed.hostname or ""
+    path = parsed.path.strip("/")
+
+    # ppa: launchpadcontent.net/<user>/<repo>/ubuntu → user-repo
+    if "launchpad" in host and path:
+        parts = [p for p in path.split("/") if p not in ("ubuntu", "ppa")]
+        if len(parts) >= 2:
+            return f"{parts[0]}-{parts[1]}"
+        if parts:
+            return parts[0]
+
+    # cursor: downloads.cursor.com/aptrepo → cursor
+    if "cursor" in host:
+        return "cursor"
+
+    # google chrome: dl.google.com/linux/chrome → google-chrome
+    if "google" in host:
+        return "google-chrome"
+
+    # docker: download.docker.com/linux/ubuntu → docker
+    if "docker" in host:
+        return "docker"
+
+    # nodesource: deb.nodesource.com/node_22.x → nodesource
+    if "nodesource" in host:
+        return "nodesource"
+
+    # archive/security: *.ubuntu.com/ubuntu → ubuntu
+    if "ubuntu.com" in host and "ubuntu" in path:
+        return "ubuntu"
+
+    # pkg.dev: <host>/projects/<name> → name
+    if host.endswith(".pkg.dev") and path.startswith("projects/"):
+        parts = path.split("/")
+        if len(parts) >= 2:
+            return parts[1].rstrip("/")
+
+    # s3 bucket: <name>.s3.<region>.amazonaws.com or <name>.s3.brave.com
+    if ".s3." in host:
+        bucket = host.split(".s3.")[0]
+        # brave-browser-apt-release → brave
+        if bucket.startswith("brave"):
+            return "brave"
+        return bucket
+
+    # windsurf: windsurf-stable.codeiumdata.com → windsurf
+    if "codeiumdata" in host:
+        return "windsurf"
+
+    # yandex mirrors: mirror.yandex.ru/mirrors/launchpad/ondrej/php → ondrej-php
+    if "yandex" in host and "launchpad" in path:
+        parts = path.split("/")
+        idx = parts.index("launchpad") if "launchpad" in parts else -1
+        if idx >= 0 and idx + 1 < len(parts):
+            return "-".join(parts[idx + 1:])
+
+    # debian.griffo.io → griffo
+    if host.endswith(".griffo.io"):
+        return host.split(".")[-2]
+
+    # generic: use host base name + first meaningful path segment
+    skip = {"apt", "repo", "repos", "packages", "stable", "dists", "ubuntu"}
+    segments = [s for s in path.split("/") if s and s not in skip]
+
+    if host.count(".") >= 2:
+        base = host.rsplit(".", 2)[-2]
+    else:
+        base = host
+
+    if segments:
+        return f"{base}-{segments[0]}".strip("-")
+    return base
+
+
+def _parse_pins() -> list[dict]:
+    """Parse pin rules from /etc/apt/preferences and preferences.d/."""
+    paths = ["/etc/apt/preferences"]
+    pref_dir = Path("/etc/apt/preferences.d")
+    if pref_dir.is_dir():
+        paths += [str(p) for p in pref_dir.iterdir() if p.is_file()]
+
+    pins: list[dict] = []
+    for path in paths:
+        try:
+            content = Path(path).read_text()
+        except OSError:
+            continue
+
+        for block in re.split(r"\n\n+", content):
+            pkg = pin = None
+            priority = None
+            for line in block.splitlines():
+                line = line.strip()
+                if line.startswith("#") or not line:
+                    continue
+                if line.lower().startswith("package:"):
+                    pkg = line.split(":", 1)[1].strip()
+                elif line.lower().startswith("pin:"):
+                    pin = line.split(":", 1)[1].strip()
+                elif line.lower().startswith("pin-priority:"):
+                    try:
+                        priority = int(line.split(":", 1)[1].strip())
+                    except ValueError:
+                        pass
+            if pin and priority is not None:
+                pins.append({"package": pkg, "pin": pin, "priority": priority})
+
+    return pins
+
+
+def _match_pin(uri: str, pins: list[dict]) -> tuple[bool, int | None]:
+    """Check if any pin rule matches the given URI by origin hostname."""
+    parsed = urlparse(uri)
+    host = parsed.hostname
+    if not host:
+        return False, None
+
+    for p in pins:
+        pin_str = p["pin"]
+        # Pin: origin <hostname>
+        m = re.match(r"origin\s+(.+)", pin_str, re.IGNORECASE)
+        if m and m.group(1).strip().lower() == host.lower():
+            return True, p["priority"]
+
+    return False, None
+
+
+def summary() -> list[dict]:
+    """List all configured APT repositories.
+
+    Returns:
+        List of dicts with name, url, branch, pinned, pin-priority.
+    """
+    sl = aptsources.sourceslist.SourcesList(deb822=True)
+    pins = _parse_pins()
+
+    repos: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    for entry in sl.exploded_list():
+        if not entry.type:
+            continue
+
+        key = (entry.uri, entry.dist)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        pinned, pin_priority = _match_pin(entry.uri, pins)
+        repos.append({
+            "name": _derive_name(entry.uri),
+            "url": entry.uri,
+            "branch": entry.dist,
+            "pinned": pinned,
+            "pin-priority": pin_priority,
+        })
+
+    return repos
+
+
+def main():
+    cli = CLI(version="1.0.0", prog=__file__, description="List APT repositories")
+
+    @cli.command(default=True)
+    def summary_cmd() -> list[dict]:
+        """Show all configured APT repositories"""
+        return summary()
+
+    cli.run()
+
+
+if __name__ == "__main__":
+    main()
