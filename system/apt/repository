@@ -349,6 +349,9 @@ def activate(
     if not components:
         components = tuple(_list_components(suite, url))
 
+    hostname = _hostname_from_url(url)
+    base = hostname.split('.')[-2]
+
     sl = aptsources.sourceslist.SourcesList(deb822=True)
 
     source_exists = False
@@ -368,10 +371,9 @@ def activate(
             break
 
     if not source_exists:
-        hostname = _hostname_from_url(url)
         sources_dir = Path("/etc/apt/sources.list.d")
         sources_dir.mkdir(parents=True, exist_ok=True)
-        source_file = sources_dir / f"{hostname}.sources"
+        source_file = sources_dir / f"{base}-{suite}.sources"
 
         entry = (
             f"Types: deb\n"
@@ -393,8 +395,6 @@ def activate(
     }
 
     if pin_priority is not None:
-        hostname = _hostname_from_url(url)
-
         if pin_priority == "smallest":
             priority = _compute_fallback_priority()
         else:
@@ -405,7 +405,7 @@ def activate(
 
         pin_dir = Path("/etc/apt/preferences.d")
         pin_dir.mkdir(parents=True, exist_ok=True)
-        pin_file = pin_dir / f"{hostname}.pref"
+        pin_file = pin_dir / f"{base}-{suite}.pref"
 
         pins = _parse_pins()
         pin_updated = False
