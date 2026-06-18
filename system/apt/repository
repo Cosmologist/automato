@@ -445,8 +445,6 @@ _C_PIN = _color("\033[93m")
 
 def _format_colored(repos: list[dict]):
     print(file=sys.stderr)
-    print("Used colors", file=sys.stderr)
-    print("———————-", file=sys.stderr)
     print(f"{_C_NUM}line number{_C_RESET}", file=sys.stderr)
     print(f"{_C_URL}repository url{_C_RESET}", file=sys.stderr)
     print(f"{_C_SUITE}suite name{_C_RESET}", file=sys.stderr)
