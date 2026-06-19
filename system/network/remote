@@ -27,6 +27,13 @@ _TLS_VERSION = {
 
 _ALLOWED_TLS = frozenset(_TLS_VERSION.values())
 
+_INVALID_HOSTS = frozenset(["localhost", "invalid2.invalid", "OPNsense.localdomain"])
+
+
+def _valid_host(host: str) -> bool:
+    """Filter out hosts considered invalid by original sni-finder logic."""
+    return host.count(".") == 1 and host not in _INVALID_HOSTS
+
 
 def _parse_cert(tls_sock: ssl.SSLSocket) -> dict:
     """Return parsed certificate dict from an established TLS socket.
@@ -142,13 +149,13 @@ def info(
         san = cert.get("subjectAltName", [])
         if san:
             for kind, value in san:
-                if kind == "DNS":
+                if kind == "DNS" and _valid_host(value):
                     hosts.append(value)
         else:
             subject = cert.get("subject", [])
             for attr_set in subject:
                 for key, value in attr_set:
-                    if key == "commonName":
+                    if key == "commonName" and _valid_host(value):
                         hosts.append(value)
                         break
         result["hosts"] = hosts if hosts else None
