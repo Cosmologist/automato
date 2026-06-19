@@ -122,3 +122,12 @@ def show(name: str, *fields: Literal["a", "b", "c"]) -> dict:
     requested = set(fields) if fields else set(choices)
 ```
 
+### `arg_labels` parameter
+Override argumentt display in usage/help by passing `arg_labels` to CLI:
+
+```python
+cli = CLI(arg_labels={"name": "name|default", "fields": "fields"})
+```
+
+### Missing arguments → help
+When required positional arguments are missing, the CLI shows the error followed by usage.
