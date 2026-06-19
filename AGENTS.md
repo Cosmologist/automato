@@ -48,27 +48,6 @@ Override argumentt display in usage/help by passing `arg_labels` to CLI:
 cli = CLI(arg_labels={"name": "name|default", "fields": "fields"})
 ```
 
-### Variadic args with Literal
-Use `typing.Literal` to document valid values for variadic arguments. The CLI extracts choices automatically for display and validation:
-
-```python
-from typing import Literal
-
-def show(name: str, *fields: Literal["a", "b", "c"]) -> dict: ...
-```
-
-Usage shows `[<fields>...]`, help shows the choices in the FIELDS section. Derive the default set from the Literal at runtime to avoid duplication:
-
-```python
-from typing import Literal, get_type_hints
-from lib.cli import _literal_choices
-
-def show(name: str, *fields: Literal["a", "b", "c"]) -> dict:
-    hints = get_type_hints(show)
-    choices = _literal_choices(hints.get("fields"))
-    requested = set(fields) if fields else set(choices)
-```
-
 ### Requirements
 Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
 
