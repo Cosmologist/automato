@@ -20,3 +20,35 @@ Arguments are parsed from the command function signature:
 - You can pass methods names to use by defaults command mode to lib.CLI constructor.
 - When multiple commands are marked as default, the CLI picks the best match by comparing how many positional arguments each function signature can consume from `argv`.
 This allows transparent dispatch: `./script.py eth0` can resolve to `show(iface="eth0")` even though `show` is not explicitly named.
+
+##### Output
+Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serializes the return value:
+- **Dict** → aligned `key: value` (bold keys)
+- **List of dicts** as table with border=1
+- **Errors** → plain text to stderr (no JSON)
+
+Data lines contain only whitespace between values — no ANSI, no borders.
+
+Example output:
+```
+name lo
+mtu  65536
+...
+```
+
+#####  `--tty` option
+Control output formatting:
+
+- `--tty` or `--tty=true` → force formatted output (table with ANSI)
+- `--tty=false` or `--tty false` → force plain output (values only)
+- Not specified → auto-detect: formatted in terminal, plain when piped
+
+In plain mode (`--tty=false`), dict values are space-separated on one line.
+
+Examples:
+
+```bash
+./script.py eth0 --tty           # force formatted even when piped
+./script.py eth0 --tty=false     # force plain in terminal
+./script.py eth0                 # auto: plain when piped, formatted in terminal
+```
