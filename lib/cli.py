@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import os
 from pathlib import Path
 import re
@@ -442,6 +443,15 @@ class CLI:
             return int(value)
         if target == float:
             return float(value)
+        origin = get_origin(target)
+        if origin is list:
+            if not value.startswith("["):
+                value = "[" + value + "]"
+            return json.loads(value)
+        if origin is dict:
+            if not value.startswith("{"):
+                value = "{" + value + "}"
+            return json.loads(value)
         return value
 
     # -- help --

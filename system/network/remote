@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Get remote TCP/TLS connection info"""
+
+from __future__ import annotations
+
+import os
+import socket
+import ssl
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+import _ssl as _ssl_mod
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.cli import CLI
+
+
+_TLS_VERSION = {
+    "TLSv1": "1.0",
+    "TLSv1.1": "1.1",
+    "TLSv1.2": "1.2",
+    "TLSv1.3": "1.3",
+}
+
+_ALLOWED_TLS = frozenset(_TLS_VERSION.values())
+
+
+def _parse_cert(tls_sock: ssl.SSLSocket) -> dict:
+    """Return parsed certificate dict from an established TLS socket.
+
+    Uses ``getpeercert()`` first.  Falls back to writing the binary
+    certificate to a temporary PEM file and decoding it with ``_ssl._test_decode_cert``
+    (a compatibility workaround for Python 3.13 / OpenSSL 3.5 where
+    ``getpeercert()`` returns an empty dict).
+    """
+    cert = tls_sock.getpeercert()
+    if cert:
+        return cert
+
+    der = tls_sock.getpeercert(binary_form=True)
+    if not der:
+        return {}
+
+    pem = ssl.DER_cert_to_PEM_cert(der)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
+        f.write(pem)
+        tmp = f.name
+    try:
+        return _ssl_mod._test_decode_cert(tmp)
+    except Exception:
+        return {}
+    finally:
+        os.unlink(tmp)
+
+
+def info(
+    ip: str,
+    port: int = 443,
+    connect_timeout: int = 4,
+    prefer_protocols: list[str] = ["h2", "http/1.1"],
+    verify_certificate: bool = False,
+) -> dict[str, Any]:
+    """Establish a connection to a remote host and return connection details.
+
+    Performs a TCP handshake followed by a TLS handshake.  On success the
+    negotiated ALPN protocol, TLS version and certificate SAN (or CN) are
+    returned.  If the TLS handshake fails the dict still contains the TCP-level
+    fields but ``tls``, ``protocol`` and ``hosts`` are set to ``None``.
+
+    Args:
+        ip:
+            Remote IP address or hostname.
+
+        port:
+            Remote TCP port.
+
+        connect_timeout:
+            Maximum time in seconds to wait for the TCP handshake.
+            Accepted values: 0 – 300.  Default: 4.
+
+        prefer_protocols:
+            Ordered list of ALPN protocol names to negotiate.
+            Accepted values: any strings valid for ``ssl.SSLContext.set_alpn_protocols``.
+            Default: ``["h2", "http/1.1"]``.
+
+        verify_certificate:
+            Whether to verify the server certificate chain.
+            If ``False`` the certificate is still fetched and inspected but
+            validity is not enforced.
+
+    Returns:
+        A dict with the following keys:
+
+        - **ip** — remote IP address as seen by ``getpeername()``.
+        - **port** — remote TCP port.
+        - **protocol** — negotiated ALPN protocol name, or ``None``.
+        - **tls** — TLS version string (one of
+          :data:`_ALLOWED_TLS`) or ``None``.
+        - **hosts** — ``list`` of DNS entries from the certificate's
+          Subject Alternative Name (SAN).  Falls back to the Common Name (CN)
+          when no SAN is present.  ``None`` when no certificate was received.
+        - **latency** — TCP handshake duration in milliseconds.
+    """
+
+    start = time.monotonic()
+    sock = socket.create_connection((ip, port), timeout=connect_timeout)
+    latency = int((time.monotonic() - start) * 1000)
+
+    remote = sock.getpeername()
+    result: dict[str, Any] = {
+        "ip": remote[0],
+        "port": remote[1],
+        "protocol": None,
+        "tls": None,
+        "hosts": None,
+        "latency": latency,
+    }
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE if not verify_certificate else ssl.CERT_REQUIRED
+    ctx.set_alpn_protocols(prefer_protocols)
+
+    try:
+        tls_sock = ctx.wrap_socket(sock, server_hostname=ip)
+    except ssl.SSLError:
+        sock.close()
+        return result
+
+    raw_version = tls_sock.version()
+    if raw_version in _TLS_VERSION:
+        result["tls"] = _TLS_VERSION[raw_version]
+
+    result["protocol"] = tls_sock.selected_alpn_protocol()
+
+    cert = _parse_cert(tls_sock)
+    if cert:
+        hosts: list[str] = []
+        san = cert.get("subjectAltName", [])
+        if san:
+            for kind, value in san:
+                if kind == "DNS":
+                    hosts.append(value)
+        else:
+            subject = cert.get("subject", [])
+            for attr_set in subject:
+                for key, value in attr_set:
+                    if key == "commonName":
+                        hosts.append(value)
+                        break
+        result["hosts"] = hosts if hosts else None
+
+    tls_sock.close()
+    return result
+
+
+def main():
+    cli = CLI(description="Get remote TCP/TLS connection info", prog=__file__)
+    cli.command(info, default=True)
+    cli.run()
+
+
+if __name__ == "__main__":
+    main()
