@@ -16,16 +16,17 @@ The project contains various useful, semantically structured and ready to embed 
 * `lib/` - for internal use, for boilerplate's, utils, wrappers etc.
 
 ### Tools
+
 **Tool naming** - prefer *entity name* of applicable domain/subdomain.  
 **Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed).
 
 #### Implementation common requirements
-- Tool is ordinary python module, you can import it and use from python. 
-- Module divides on multiple single-responsibility methods.
-- Methods are environment-agnostic.
-- Methods must have a comment with a short, precise and concise description.
-- Methods parameters should be type-hinted and have description.
-- DontRepeatYourself - avoid to code duplication across modules - reuse already logic from existed modules if possible.
+- The tool is a ordinary module written in Python, sharpened for reusing - this is its main and most important purpose, therefore:
+- the code should be according to the best practices, clean, understandable and contain nothing superfluous
+- follow dry, single responsibility, Kiss, don't produce extra entities, don't do premature optimization
+- write code according to my assignment, first discuss your options and ideas with me - the code should be commented on, especially the functions, accepted values and return results
+- the code should look like written Senior developer
+- code should not be aware of the environment such as the operating system where it is started (cli, gui - comments should be concise, simple and revealing the functions, its parameters and return result must have type-hints
 - To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description.
 - The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
 
