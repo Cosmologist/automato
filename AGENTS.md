@@ -15,12 +15,9 @@ The project contains various useful, semantically structured and ready to embed 
 * `configure/`, `examples/`, `tools/` - legacy, ignore them.
 * `lib/` - for internal use, for boilerplate's, utils, wrappers etc.
 
-### Tools
-
-**Tool naming** - prefer *entity name* of applicable domain/subdomain.  
-**Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed).
-
-#### Tool as Module
+### Tool Rules
+- **Name** - prefer *entity name* of applicable domain/subdomain.  
+- **Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed)
 - The tool is a ordinary module written in Python, sharpened for reusing - this is its main and most important purpose, therefore:
 - the code should be according to the best practices, clean, understandable and contain nothing superfluous
 - follow dry, single responsibility, Kiss, don't produce extra entities, don't do premature optimization
@@ -31,11 +28,15 @@ The project contains various useful, semantically structured and ready to embed 
 - The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
 
 #### Tool as CLI application
+To add CLI ability to module, use this code ```python
+def main():
+.   CLI(<Short single-line description>, <reference to this module>).run()
+```
+if the user has explicitly written any requirements for the CLI - read CLI.md for details.
+See CLI.md if  detailed instructions how t
 - The second, additional purpose of the tool is to use it as an application in the terminal console. The second, additional purpose of the tool is to use it as an application in the terminal console.
 - To keep environment-agnostic requirement satisfaction the CLI integration possible ONLY inside `def main`.
 - Using tool from cli should not affect the module code (except for def main).
-- Ordinary integration achieved with single-line `CLI(<Short single-line description>, <reference to this module>).run()`.
-- Module methods to expose to CLI should be visible scope and decorated as `@cli.command()`.
 
 ### CLI component
 `./lib/cli.py` is an automatic configurable adapter between CLI and modules.
