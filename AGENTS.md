@@ -66,18 +66,16 @@ This allows transparent dispatch: `./script.py eth0` can resolve to `show(iface=
 ##### Output
 Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serializes the return value:
 - **Dict** → aligned `key: value` (bold keys)
-- **List of dicts** as single dict multiple time with divider between dicts
+- **List of dicts** as table with border=1
 - **Errors** → plain text to stderr (no JSON)
 
 Data lines contain only whitespace between values — no ANSI, no borders.
 
 Example output:
 ```
-name     lo
-status   UP
-mtu      65536
-ip       127.0.0.1/8
-gateway  None
+name lo
+mtu  65536
+...
 ```
 
 #####  `--tty` option
@@ -104,28 +102,21 @@ ANSI colors when terminal supports it (respects `NO_COLOR`):
 
 | Element | ANSI | Example |
 |---|---|---|---|
-| Module description | `\033[36m` (cyan) | `# Show network interface info` |
+| Module description | `\033[36m` (cyan) | `# Show network info` |
 | Command name in listing | `\033[1;36m` (bold cyan) | `#   show    Description` |
 | Argument placeholder | `\033[32m` (green) | `<name>`, `[<fields>...]` |
 | Option flag in usage | `\033[33m` (yellow) | `--help`, `--tty` |
 | Full usage line | `\033[2m` (dim) | `#   interface show <iface> [--args]` |
 | Data keys/output | `\033[1m` (bold) | `name     eno1` |
 | Error message | `\033[31m` (red) | `Interface not found` |
-| Banner title | `\033[1m` (bold) | `[▸] interface — desc 1.0.0` |
+| Banner title | `\033[1m` (bold) | `[▸] interface — desc` |
 
-Single command (no name mentioned anywhere):
+Example:
 ```
-[▸] <name> — <desc> <version>
+[<any suitable icon 1 char>] <name> — <desc>
 ───────────────────────────────────────────────────
-Usage: <prog> <name> [<args>...] [--help] [--tty]
-───────────────────────────────────────────────────
-```
-
-Multi-command:
-```
-[▸] <name> — <desc> <version>
-───────────────────────────────────────────────────
-Usage: <prog> <command> [args...] [--help] [--tty]
+Usage: <prog> <command1> [args...] [--help] [--tty]
+.      <prog> <command2> [args...] [--help] [--tty]
 ───────────────────────────────────────────────────
 
   <cmd>    <description>
@@ -179,17 +170,6 @@ def show(name: str, *fields: Literal["a", "b", "c"]) -> dict:
     choices = _literal_choices(hints.get("fields"))
     requested = set(fields) if fields else set(choices)
 ```
-
-### Versioning
-- Use semantic versioning with non-annotated git tags: `git tag <name>-<version>` (no `-a`)
-- Each subproject within automato has its own version tag: `system-network-interface-1.0.0`
-- Pass `version` to the CLI constructor in `main()`
-- Tag only before push
-- Push workflow:
-  1. Update `version` in the endpoint's `main()`
-  2. Commit the change
-  3. Tag non-annotated: `git tag <module>-<version>` and `git tag automato-<version>`
-  4. Push: `git push origin master --tags`
 
 ### Requirements
 Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
