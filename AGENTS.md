@@ -39,24 +39,12 @@ Else read and follow CLI.md for details.
 - To keep environment-agnostic requirement satisfaction the CLI integration possible ONLY inside `def main`.
 - Using tool from cli should not affect the module code (except for def main)
 
-
-
-### `arg_labels` parameter
-Override argumentt display in usage/help by passing `arg_labels` to CLI:
-
-```python
-cli = CLI(arg_labels={"name": "name|default", "fields": "fields"})
-```
-
 ### Requirements
 Не подключать внешние зависимости через импорт сторонних библиотек, кроме стандартной библиотеки Python. Если нужна сторонняя библиотека — использовать `uv run` и указывать зависимости в скрипте через inline-метаданные.
 
 ### Shebang and Executable Permissions
 The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`). 
 This allows running the script directly as `./script.py` without explicitly invoking an interpreter.
-
-### Missing arguments → help
-When required positional arguments are missing, the CLI shows the error followed by usage.
 
 ### Scope
 An endpoint does exactly what its name implies — no extra features, commands, or modes beyond the stated purpose. Resist feature creep.
