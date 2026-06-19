@@ -28,47 +28,16 @@ The project contains various useful, semantically structured and ready to embed 
 - The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
 
 #### Tool as CLI application
-To add CLI ability to module, use this code ```python
+If the user hasn't explicitly specified any requirements for the cli, then just do this:
+```
 def main():
 .   CLI(<Short single-line description>, <reference to this module>).run()
 ```
-if the user has explicitly written any requirements for the CLI - read CLI.md for details.
-See CLI.md if  detailed instructions how t
+Else read and follow CLI.md for details.
+
 - The second, additional purpose of the tool is to use it as an application in the terminal console. The second, additional purpose of the tool is to use it as an application in the terminal console.
 - To keep environment-agnostic requirement satisfaction the CLI integration possible ONLY inside `def main`.
 - Using tool from cli should not affect the module code (except for def main)
-
-##### Output
-Command functions **return** data structures (dict, list, str, etc.) — they never print. The CLI serializes the return value:
-- **Dict** → aligned `key: value` (bold keys)
-- **List of dicts** as table with border=1
-- **Errors** → plain text to stderr (no JSON)
-
-Data lines contain only whitespace between values — no ANSI, no borders.
-
-Example output:
-```
-name lo
-mtu  65536
-...
-```
-
-#####  `--tty` option
-Control output formatting:
-
-- `--tty` or `--tty=true` → force formatted output (table with ANSI)
-- `--tty=false` or `--tty false` → force plain output (values only)
-- Not specified → auto-detect: formatted in terminal, plain when piped
-
-In plain mode (`--tty=false`), dict values are space-separated on one line.
-
-Examples:
-
-```bash
-./script.py eth0 --tty           # force formatted even when piped
-./script.py eth0 --tty=false     # force plain in terminal
-./script.py eth0                 # auto: plain when piped, formatted in terminal
-```
 
 ### Styling (stderr header)
 Header with banner title is shown on every invocation (except `--tty=false`). Usage line only shown on error or `--help`. On success, header goes to stderr and data to stdout.
