@@ -52,3 +52,31 @@ Examples:
 ./script.py eth0 --tty=false     # force plain in terminal
 ./script.py eth0                 # auto: plain when piped, formatted in terminal
 ```
+
+### Styling (stderr header)
+Header with banner title is shown on every invocation (except `--tty=false`). Usage line only shown on error or `--help`. On success, header goes to stderr and data to stdout.
+
+ANSI colors when terminal supports it (respects `NO_COLOR`):
+
+| Element | ANSI | Example |
+|---|---|---|---|
+| Module description | `\033[36m` (cyan) | `# Show network info` |
+| Command name in listing | `\033[1;36m` (bold cyan) | `#   show    Description` |
+| Argument placeholder | `\033[32m` (green) | `<name>`, `[<fields>...]` |
+| Option flag in usage | `\033[33m` (yellow) | `--help`, `--tty` |
+| Full usage line | `\033[2m` (dim) | `#   interface show <iface> [--args]` |
+| Data keys/output | `\033[1m` (bold) | `name     eno1` |
+| Error message | `\033[31m` (red) | `Interface not found` |
+| Banner title | `\033[1m` (bold) | `[▸] interface — desc` |
+
+Example:
+```
+[<any suitable icon 1 char>] <name> — <desc>
+───────────────────────────────────────────────────
+Usage: <prog> <command1> [args...] [--help] [--tty]
+.      <prog> <command2> [args...] [--help] [--tty]
+───────────────────────────────────────────────────
+
+  <cmd>    <description>
+           <prog> <cmd> [<args>...]
+```
