@@ -52,7 +52,7 @@ Arguments are parsed from the command function signature:
 - Parameters **without defaults** → positional CLI arguments
 - Parameters **with defaults** → `--name` optional CLI options
 - `*args` variadic parameter → collects remaining positional arguments after required ones
-- If method argument require structure (list or dist) - CLI occur this structure in json format then convert it from string to native structure. also, for convenience root parentheses in json may be ommited (example - "1,2,3" === ["1", "2", "3"])
+- If method argument require structure (list or dist) - CLI occurs this structure in json format then convert it from string to native structure. also, for convenience root parentheses in json may be ommited (example - "1,2,3" === ["1", "2", "3"], if method_arg[type]==list then input_value="[" + input_value + "]", same for dict)
 
 ##### Default command
 - You can pass methods names to use by defaults command mode to lib.CLI constructor.
