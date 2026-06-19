@@ -39,28 +39,10 @@ Else read and follow CLI.md for details.
 - To keep environment-agnostic requirement satisfaction the CLI integration possible ONLY inside `def main`.
 - Using tool from cli should not affect the module code (except for def main)
 
-### Help
-- `description` parameter in CLI constructor → banner title
-- Google-style `Args:` section → per-parameter descriptions in `--help`
-- Single-command endpoint → `--help` shows banner + usage + ARGUMENTS + OPTIONS (no command name)
-- Multi-command endpoint → `--help` shows banner + usage + COMMANDS + OPTIONS
-- `--help` on explicit command (`show --help`) shows command-specific usage + ARGUMENTS + OPTIONS
-- `--help` is called on partial args to show available commands
-- `--help` and `--tty` descriptions use `print_opt(name, desc)` for dynamic wrapping
-- Multi-line descriptions in `print_opt` use `\n` to separate segments; each segment wraps independently
 
-### `print_opt` helper
-`print_opt(name, desc)` prints a `--name` option with description aligned at column 16. Handles newline-separated segments (each on its own line) and dynamic `textwrap.wrap` per terminal width.
-
-Example `--tty` output:
-```
-  --tty         - false — plain-values output for machines
-                - true — decorated output for humans
-                - unset — automatic selection
-```
 
 ### `arg_labels` parameter
-Override positional argument display in usage/help by passing `arg_labels` to CLI:
+Override argumentt display in usage/help by passing `arg_labels` to CLI:
 
 ```python
 cli = CLI(arg_labels={"name": "name|default", "fields": "fields"})
