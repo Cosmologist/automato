@@ -20,7 +20,7 @@ The project contains various useful, semantically structured and ready to embed 
 **Tool naming** - prefer *entity name* of applicable domain/subdomain.  
 **Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed).
 
-#### Implementation common requirements
+#### Tool as Module
 - The tool is a ordinary module written in Python, sharpened for reusing - this is its main and most important purpose, therefore:
 - the code should be according to the best practices, clean, understandable and contain nothing superfluous
 - follow dry, single responsibility, Kiss, don't produce extra entities, don't do premature optimization
@@ -30,25 +30,25 @@ The project contains various useful, semantically structured and ready to embed 
 - To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description.
 - The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
 
-#### CLI Integration
-- Tool can be used from terminal by-default.
+#### Tool as CLI application
+- The second, additional purpose of the tool is to use it as an application in the terminal console. The second, additional purpose of the tool is to use it as an application in the terminal console.
 - To keep environment-agnostic requirement satisfaction the CLI integration possible ONLY inside `def main`.
+- Using tool from cli should not affect the module code (except for def main).
 - Ordinary integration achieved with single-line `CLI(<Short single-line description>, <reference to this module>).run()`.
-- Methods to expose to CLI should be visible scope and decorated as `@cli.command()`.
+- Module methods to expose to CLI should be visible scope and decorated as `@cli.command()`.
 
 ### CLI component
-`./lib/cli.py` is an adapter between CLI and modules.
+`./lib/cli.py` is an automatic configurable adapter between CLI and modules.
 
 #### Methods to CLI translation scheme
-- Expose only methods decorated as `@lib.cli.command()`.
 - Methods translated to command modes/operations.
 - Method parameters translated to mode/operation argument or options.
 - Method and parameters comments, type-hints, default-values translated to corresponding methods/options.
 - Errors and exceptions translated to stderr and exit code.
 
 ##### Default command
-Method decorated with `@lib.cli.command(default=True)` not required explicit passing of corresponded mode/operation name.
-When multiple commands are marked `default=True`, the CLI picks the best match by comparing how many positional arguments each function signature can consume from `argv`.
+- You can pass methods names to use by defaults command mode to lib.CLI constructor.
+- When multiple commands are marked as default, the CLI picks the best match by comparing how many positional arguments each function signature can consume from `argv`.
 This allows transparent dispatch: `./script.py eth0` can resolve to `show(iface="eth0")` even though `show` is not explicitly named.
 
 ============================================================
