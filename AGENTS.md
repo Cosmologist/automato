@@ -1,5 +1,5 @@
 # Automato — Agent Guide
-The project contains various useful, semantically structured and ready to embed (via pipes or code) tools.
+The project is a collection of semanically structured Python modules.
 
 ## Common
 Use **English** for literals.
@@ -11,13 +11,14 @@ Inline dependencies for use `uv run`.
 ## Code Styling
 - the code should be according to the
 best practices, clean, understandable and contain nothing superfluous
-- follow dry, single responsibility, Kiss, don't produce extra entities, don't do premature optimization
+- follow DRY, Single Responsibility, KISS, YAGNI, don't produce extra entities
 - write code according to my assignment, first discuss your options and ideas with me - the code should be commented on, especially the functions, accepted values and return results
 - the code should look like written Senior developer
-- code should not be aware of the environment such as the operating system where it is started (cli, gui - comments should be concise, simple and revealing the functions, its parameters and return result must have type-hints
+- code should be environment-agnostic
+- clients should be concise, simple and revealing the functions, its parameters and return result must have type-hints
 
 ## Project 
-- The tool is a ordinary module written in Python, sharpened for reusing - this is its main and most important purpose, therefore: 
+- , therefore: 
 - To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description.
 - The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
 
