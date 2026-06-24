@@ -2,22 +2,12 @@
 The project contains various useful, semantically structured and ready to embed (via pipes or code) tools.
 
 ## Common rules
-**Language** - use **English** for all code, comments, commit messages, and documentation.
+Use **English** for literals.
+Use **Python** by default.
 
-## Project rules
+## Code Styling
 
-### Filesystem Structure
-- `<applicable-domain>/<tool>` - if applicable domain contains only this one tool, example `amneziawg\client`.
-- `<applicable-domain>/<applicable-subdomin>/<tool>` - if applicable domain contains only this one tool, example `system/network/interface`.
-
-**Exclusions**:
-* `app/` is a sandbox for application prototypes (specialized application tasks).
-* `configure/`, `examples/`, `tools/` - legacy, ignore them.
-* `lib/` - for internal use, for boilerplate's, utils, wrappers etc.
-
-### Tool Rules
-- **Name** - prefer *entity name* of applicable domain/subdomain.  
-- **Programming Language** - Python only, excluding `app/` (for applications, any suitable language is allowed)
+## Project 
 - The tool is a ordinary module written in Python, sharpened for reusing - this is its main and most important purpose, therefore:
 - the code should be according to the best practices, clean, understandable and contain nothing superfluous
 - follow dry, single responsibility, Kiss, don't produce extra entities, don't do premature optimization
