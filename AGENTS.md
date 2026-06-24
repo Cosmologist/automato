@@ -19,11 +19,7 @@ best practices, clean, understandable and contain nothing superfluous
 - code should be environment-agnostic
 - clients should be concise, simple and revealing the functions, its parameters and return result must have type-hints
 
-## Project 
-- To achieve effective reusing - read and manage REGISTRY.md - enumeration existed modules and method with short description.
-- The script MUST have a correct shebang (`#!/usr/bin/env python3`) and the executable bit MUST be set (`chmod +x`).
-
-#### CLI integration 
+## CLI integration 
 Each module can be called from console - don't worry about - just add:
 ```
 def main():
@@ -31,6 +27,6 @@ def main():
 ```
 
 ### REGISTRY.md
-Contains a list of existing utils and methods.  
+Before task planning read REGISTRY.md - enumeration of existed modules and method with short description for you.
 Format: `util:method - short and consize description`.  
 Keep list up to date
