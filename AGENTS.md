@@ -22,8 +22,8 @@ best practices, clean, understandable and contain nothing superfluous
 ## CLI integration 
 Each module can be called from console - don't worry about - just add:
 ```
-def main():
-.   lib.CLI(<Short single-line description>, <reference to this module>).run()
+if __name__ == "__main__":
+.   lib.CLI(description="<Short single-line description>, prog=__module__).run()
 ```
 
 ### REGISTRY.md
