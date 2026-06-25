@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""List AmneziaWG client profiles"""
+"""AmneziaWG client manager"""
 
 from __future__ import annotations
 
+import configparser
 import sys
 from pathlib import Path
 
@@ -13,38 +14,23 @@ CONFIG_DIR = Path("/etc/amnezia/amneziawg")
 
 
 def profiles(config_dir: Path | str = CONFIG_DIR) -> list[dict]:
-    """List AmneziaWG profiles from a config directory.
+    """List AmneziaWG profiles.
 
     Args:
-        config_dir: Directory containing .conf files
+        config_dir: Directory containing .conf files ["/etc/amnezia/amneziawg"]
     """
     config_dir = Path(config_dir)
     result = []
     for conf in sorted(config_dir.glob("*.conf")):
-        text = conf.read_text()
-        has_interface = False
-        has_peer = False
-        endpoint = ""
-
-        section = None
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("[Interface]"):
-                section = "interface"
-                has_interface = True
-            elif stripped.startswith("[Peer]"):
-                section = "peer"
-                if not has_peer:
-                    has_peer = True
-            elif section == "peer" and not endpoint:
-                if stripped.lower().startswith("endpoint"):
-                    endpoint = stripped.split("=", 1)[1].strip()
-
+        parser = configparser.ConfigParser(strict=False, allow_no_value=True)
+        parser.read(conf)
+        valid = parser.has_section("Interface") and parser.has_section("Peer")
+        endpoint = parser.get("Peer", "Endpoint", fallback="") if valid else ""
         result.append({
             "name": conf.stem,
             "path": str(conf),
             "peer": endpoint,
-            "valid": has_interface and has_peer,
+            "valid": valid,
         })
     return result
 
