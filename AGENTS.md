@@ -23,7 +23,7 @@ best practices, clean, understandable and contain nothing superfluous
 Each module can be called from console - don't worry about - just add:
 ```
 if __name__ == "__main__":
-.   lib.CLI(description="<Short single-line description>, prog=__module__).run()
+.   lib.CLI(description="<Short single-line description>, prog=__file__).run()
 ```
 
 ### REGISTRY.md
